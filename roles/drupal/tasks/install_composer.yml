@@ -1,0 +1,37 @@
+---
+
+- name: Download Composer Installer
+  get_url:
+    url: https://getcomposer.org/installer
+    dest: /tmp/composer-setup.php
+    mode: 0440
+
+- name:  Run the Composer installer
+  command: creates="/usr/local/bin/composer" php /tmp/composer-setup.php --install-dir=/usr/local/bin/ --filename=composer 
+
+- name: Set Composer dir permissions
+  file:
+    path: "{{ drupal_composer_path }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ apache_group }}"
+    mode: 0775
+    recurse: yes
+
+- name: Create writeable ~/.composer
+  file:
+    path: ~/.composer
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ apache_group }}"
+    mode: 0775
+    recurse: yes
+
+- name: Create writeable ~/.drush
+  file:
+    path: ~/.composer
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ apache_group }}"
+    mode: 0775
+    recurse: yes    

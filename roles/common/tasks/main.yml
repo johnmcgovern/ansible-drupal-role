@@ -1,0 +1,21 @@
+---
+
+- name: Update apt package repos (apt-get update)
+  apt:
+    update_cache: yes
+
+- name: Install python modules and git
+  apt: name={{ item }} state=present
+  with_items:
+   - python
+   - python-pip
+   - python-dev
+   - git
+   - unzip
+
+
+- name: Add ansible_user to www-data to permissions work for updates
+  user:
+    name: "{{ ansible_user }}"
+    groups: www-data
+    append: yes   

@@ -1,0 +1,16 @@
+---
+
+- name: Install MariaDB server and client
+  apt: name={{ item }} state=present
+  with_items:
+   - mariadb-server
+   - mariadb-client
+   - libmysqlclient-dev
+
+- name: Install mysql-python
+  pip:
+    name: MySQL-python
+
+- name: Start MariaDB Service
+  service: name={{ db_service }} state=started enabled=yes
+

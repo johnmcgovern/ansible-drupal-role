@@ -1,0 +1,49 @@
+---
+
+# @todo figure out why this is required
+- name: 'PRE Remove ppa:ondrej/php repo (pre main package install) as it breaks other php standard package installs down the road'
+  apt_repository:
+    repo: 'ppa:ondrej/php'
+    state: absent
+    update_cache: yes
+
+
+- name: Install http and php etc
+  apt: name={{ item }} state=present
+  with_items:
+   - apache2
+   - php
+   - php-mysql
+   - php-xml
+   - php-mbstring
+   - php-dom
+   - php-gd
+   - php-simplexml 
+   - php-xml
+   - php-curl
+   - libapache2-mod-php
+   - software-properties-common
+  notify:
+   - restart apache2   
+
+- name: Add ppa:ondrej/php repo
+  apt_repository:
+    repo: 'ppa:ondrej/php'
+
+- name: 'Install php-uploadporogress which is from a seperate repo'    
+  apt:
+    name: php-uploadprogress
+    update_cache: yes
+  register: uploadprogress_installed
+
+# @todo figure out why this is required
+- name: 'POST Remove ppa:ondrej/php repo (pre main package install) as it breaks other php standard package installs down the road'
+  apt_repository:
+    repo: 'ppa:ondrej/php'
+    state: absent
+    update_cache: yes
+
+- name: Install apache2 mod-rewrite 
+  apache2_module:
+    name: rewrite
+    state: present

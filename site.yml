@@ -1,0 +1,22 @@
+---
+# This playbook deploys the Drupal 8 application stack.
+
+- name: Apply common configuration to all nodes
+  hosts: all
+  roles:
+    - common
+
+- name: Configure and deploy the webserver
+  hosts: webservers
+  roles:
+    - web
+
+- name: Deploy MySQL and configure the database
+  hosts: dbservers
+  roles:
+    - db
+
+- name: Deploy a base Drupal 8 installation
+  hosts: webservers
+  roles:
+    - drupal    

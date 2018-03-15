@@ -1,0 +1,28 @@
+---
+
+- name: Check for D8 Install
+  stat: 
+    path: /var/www/html/drupal8/composer.json
+  register: composer_run    
+
+- name: Make sure /var/www/html/drupal8/ doesn't exist (first run) as composer needs a blank dir
+  when: not composer_run.stat.exists  
+  file:
+    path: /var/www/html/drupal8/
+    state: absent
+
+- name: Install the latest stable Drupal 8 with Composer
+  become: false
+  when: not composer_run.stat.exists
+  composer:
+    command: create-project
+    arguments: drupal/drupal drupal8 --stability stable --no-interaction
+    working_dir: /var/www/html
+    prefer_dist: yes
+
+- name: Composer Drush install
+  composer:
+     command: require 
+     arguments: drush/drush
+     working_dir: "{{ drupal_composer_path }}"
+  become: false    

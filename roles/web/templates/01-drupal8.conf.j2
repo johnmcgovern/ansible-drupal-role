@@ -1,0 +1,17 @@
+<VirtualHost *:80>
+
+	#ServerName www.example.com
+
+	ServerAdmin changeme@test.org
+	DocumentRoot /var/www/html/drupal8
+
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+	<Directory "/var/www/html/drupal8">
+ 		AllowOverride All
+	</Directory>
+
+</VirtualHost>
+
+# vim: syntax=apache ts=4 sw=4 sts=4 sr noet

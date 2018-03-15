@@ -1,0 +1,13 @@
+---
+
+- name: Install Drupal modules
+  become: false    
+  composer:
+     command: require 
+     arguments: drupal/{{ item }}
+     working_dir: "{{ drupal_composer_path }}"
+  with_items: "{{ drupal_modules }}"
+
+- name: Run cron
+  become: false
+  command: "{{ drupal_composer_path }}/vendor/drush/drush/drush cron"

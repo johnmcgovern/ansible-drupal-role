@@ -1,0 +1,26 @@
+---
+
+- name: Create ../config/sync
+  file:
+    path: /var/www/html/drupal8/config/sync/
+    state: directory
+    mode: 0775
+
+- name: Lock down sites/default
+  file:
+    path: /var/www/html/drupal8/sites/default
+    state: directory
+    mode: 0554   
+    recurse: yes
+
+- name: Create writeable /files dir
+  file:
+    path: /var/www/html/drupal8/sites/default/files
+    state: directory
+    mode: 0774
+
+- name: Write Drupal settings.php
+  template: 
+    src: settings.php.j2 
+    dest: /var/www/html/drupal8/sites/default/settings.php
+    mode: 0444  

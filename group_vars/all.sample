@@ -1,0 +1,57 @@
+
+#
+# Ansible SSH Connection
+#
+
+ansible_user: username
+ansible_become: true
+ansible_become_pass: password123
+
+
+#
+# Apache2
+#
+
+apache_group: www-data
+apache_sites_available: /etc/apache2/sites-available
+apache_sites_enabled: /etc/apache2/sites-enabled
+
+
+# 
+# MariaDB
+#
+
+db_service: mysql
+db_port: 3306
+
+db_name: drupal8
+db_user: drupal_user
+db_user_password: password123
+
+
+#
+# Drupal
+#
+
+drupal_composer_path: /var/www/html/drupal8
+
+drupal_trusted_host_pattern: ^ubnow1\.johnmcgovern\.com$
+
+drupal_sitename: "Drupal Test Site"
+drupal_email: test@test.org
+drupal_region: en
+drupal_profile: standard
+
+drupal_admin: admin
+drupal_admin_password: password123
+
+
+#
+# Drupal Modules
+#
+
+drupal_modules:
+    - ctools
+    - token
+    - pathauto
+    - metatag

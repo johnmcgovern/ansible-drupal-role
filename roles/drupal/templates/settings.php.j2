@@ -1,0 +1,35 @@
+<?php
+
+$databases = array();
+
+$config_directories = array();
+
+$settings['hash_salt'] = 'aOB1cLUy9GBEoQ3ZeLWjmd5hJ9Qyef5tziSb53rAqK5WYbsPS9bb_ZYbVksn8nmHQm3ovm7Ufw';
+$settings['update_free_access'] = FALSE;
+
+$settings['file_scan_ignore_directories'] = [
+  'node_modules',
+  'bower_components',
+];
+
+$settings['entity_update_batch_size'] = 50;
+
+
+$config_directories['sync'] = '../config/sync';
+
+$databases['default']['default'] = array (
+  'database' => '{{ db_name }}',
+  'username' => '{{ db_user }}',
+  'password' => '{{ db_user_password }}',
+  'prefix' => '',
+  'host' => 'localhost',
+  'port' => '{{ db_port }}',
+  'namespace' => 'Drupal\\Core\\Database\\Driver\\mysql',
+  'driver' => 'mysql',
+);
+
+$settings['trusted_host_patterns'] = [
+  '{{ drupal_trusted_host_pattern }}',
+];
+
+$settings['install_profile'] = 'standard';
