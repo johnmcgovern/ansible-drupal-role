@@ -14,6 +14,13 @@ This is an Ansible role that installs a default Drupal 8 instance and all requir
 2. Navigate to playbook base directory
 3. ansible-playbook -i hosts site.yml
 
+### Compatibility
+
+This role is tested on:
+
+- Ubuntu 16.04.4 (LTS)
+- Ubuntu 17.10 (planned)
+
 ### Contact
 - john@johnmcgovern.com
 - https://www.johnmcgovern.com
