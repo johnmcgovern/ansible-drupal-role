@@ -35,7 +35,7 @@ db_user_password: password123
 
 drupal_composer_path: /var/www/html/drupal8
 
-drupal_trusted_host_pattern: ^ubnow1\.johnmcgovern\.com$
+drupal_trusted_host_pattern: ^sub\.domain\.com$
 
 drupal_sitename: "Drupal Test Site"
 drupal_email: test@test.org
