@@ -103,6 +103,9 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# macOS
+.DS_Store
+
 # Project specific
 group_vars/all
 hosts
