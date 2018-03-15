@@ -29,7 +29,7 @@
 
 - name: Create writeable ~/.drush
   file:
-    path: ~/.composer
+    path: ~/.drush
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ apache_group }}"
