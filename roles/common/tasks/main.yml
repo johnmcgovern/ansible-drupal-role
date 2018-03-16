@@ -12,6 +12,7 @@
    - python-dev
    - git
    - unzip
+   - net-tools
 
 
 - name: Add ansible_user to www-data to permissions work for updates

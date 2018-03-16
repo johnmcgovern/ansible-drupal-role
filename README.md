@@ -19,7 +19,7 @@ This is an Ansible role that installs a default Drupal 8 instance and all requir
 This role is tested on:
 
 - Ubuntu 16.04.4 (LTS)
-- Ubuntu 17.10 (planned)
+- Ubuntu 17.10
 
 ### Contact
 - john@johnmcgovern.com
