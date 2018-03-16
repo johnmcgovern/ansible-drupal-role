@@ -1,35 +1,36 @@
 ---
 
-- name: Set Composer dir permissions
+- name: Set ./drupal8 directory ownership
   file:
     path: "{{ drupal_composer_path }}"
     state: directory
-    owner: "{{ ansible_user }}"
     group: "{{ apache_group }}"
-    mode: 0775
     recurse: yes
 
 - name: Create ../config/sync
   file:
     path: /var/www/html/drupal8/config/sync/
     state: directory
-    mode: 0775
+    group: "{{ apache_group }}"
 
 - name: Write Drupal settings.php
   template: 
     src: settings.php.j2 
     dest: /var/www/html/drupal8/sites/default/settings.php
-    mode: 0444      
+    group: "{{ apache_group }}"
+    mode: 0440 
 
 - name: Lock down sites/default
   file:
     path: /var/www/html/drupal8/sites/default
     state: directory
-    mode: 0554   
+    group: "{{ apache_group }}"
+    mode: 0550   
     recurse: yes
 
 - name: Create writeable /files dir
   file:
     path: /var/www/html/drupal8/sites/default/files
     state: directory
+    group: "{{ apache_group }}"
     mode: 0774
