@@ -1,4 +1,4 @@
-# Ansible-Drupal-Playground
+# Ansible-Drupal-Role
 
 This is an Ansible role that installs a default Drupal 8 instance and all required dependencies.
 

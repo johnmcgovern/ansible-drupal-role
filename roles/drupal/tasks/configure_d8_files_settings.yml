@@ -33,4 +33,4 @@
     path: /var/www/html/drupal8/sites/default/files
     state: directory
     group: "{{ apache_group }}"
-    mode: 0774
+    mode: 0770
