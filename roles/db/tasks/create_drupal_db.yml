@@ -4,6 +4,6 @@
   mysql_db: name={{ db_name }} state=present
 
 - name: Create Drupal DB User
-  mysql_user: name={{ db_user }} password={{ db_user_password }} priv=*.*:ALL host='%' state=present 
+  mysql_user: name={{ db_user }} password={{ db_user_password }} priv={{ db_name }}.*:{{ db_user_perms }} host='localhost' state=present 
   become: true
   become_user: root   

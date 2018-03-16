@@ -27,6 +27,7 @@ db_port: 3306
 db_name: drupal8
 db_user: drupal_user
 db_user_password: password123
+db_user_perms: SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES
 
 
 #
@@ -37,7 +38,7 @@ drupal_composer_path: /var/www/html/drupal8
 
 drupal_trusted_host_pattern: ^sub\.domain\.com$
 
-drupal_sitename: "Drupal Test Site"
+drupal_sitename: Drupal Test Site
 drupal_email: test@test.org
 drupal_region: en
 drupal_profile: standard
