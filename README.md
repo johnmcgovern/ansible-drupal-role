@@ -28,16 +28,15 @@ This is an Ansible role that installs a default Drupal 8 instance and all requir
 3. Navigate to playbook base directory
 4. Run the ansible playbook:
 
-	- ansible-playbook -i hosts site.yml
+		- ansible-playbook -i hosts site.yml
 	
 5. Run the ansible playbook limited to certain hosts:
 
-	- ansible-playbook -i hosts --limit=host1 site.yml  #limits to a subset of hosts
-
+		- ansible-playbook -i hosts --limit=host1 site.yml  #limits to a subset of hosts
 
 ### Requirements
 
-1. The Ubuntu server must already have python installed
+1. The Ubuntu target server must already have python installed:
 
 		- sudo apt-get install python
 
