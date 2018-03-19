@@ -51,8 +51,14 @@ drupal_admin_password: password123
 # Drupal Modules
 #
 
-drupal_modules:
+drupal_install_modules:
     - ctools
     - token
     - pathauto
     - metatag
+
+drupal_enable_modules:
+    - ctools
+    - token
+    - pathauto
+    - metatag    
