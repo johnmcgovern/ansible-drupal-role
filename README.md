@@ -22,6 +22,12 @@ This role is tested on:
 - Ubuntu 16.04.4 (LTS)
 - Ubuntu 17.10
 
+### ToDo
+
+- Enable php.ini best-practices and tunning for group_vars/all
+- Fix password salt randomness generation (currently static)
+- Fix the ability to seperate Web and DB server (broken now)
+
 ### Contact
 - john@johnmcgovern.com
 - https://www.johnmcgovern.com
