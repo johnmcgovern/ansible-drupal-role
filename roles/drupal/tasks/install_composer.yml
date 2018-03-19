@@ -10,19 +10,21 @@
   command: creates="/usr/local/bin/composer" php /tmp/composer-setup.php --install-dir=/usr/local/bin/ --filename=composer 
 
 - name: Create writeable ~/.composer
+  become: false
   file:
     path: ~/.composer
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ apache_group }}"
-    mode: 0775
+    mode: 0770
     recurse: yes
 
 - name: Create writeable ~/.drush
+  become: false
   file:
     path: ~/.drush
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ apache_group }}"
-    mode: 0775
+    mode: 0770
     recurse: yes    

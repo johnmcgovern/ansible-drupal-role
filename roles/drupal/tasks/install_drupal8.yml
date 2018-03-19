@@ -2,14 +2,21 @@
 
 - name: Check for D8 Install
   stat: 
-    path: /var/www/html/drupal8/composer.json
+    path: "{{ drupal_base_path }}/composer.json"
   register: composer_run    
 
-- name: Make sure /var/www/html/drupal8/ doesn't exist (first run) as composer needs a blank dir
+- name: Make sure drupal_base_path doesn't exist (first run) as Composer needs a blank directory
   when: not composer_run.stat.exists  
   file:
-    path: /var/www/html/drupal8/
+    path: "{{ drupal_base_path }}"
     state: absent
+
+- name: Create D8 base directory before Composer run (using this to allow us to only use one path var)
+  file:
+    path: "{{ drupal_base_path }}"
+    state: directory
+    owner: "{{ ansible_user }}"    
+    group: "{{ apache_group }}"
 
 - name: Install Drupal 8 with Composer
   become: false
@@ -17,12 +24,12 @@
   composer:
     command: create-project
     arguments: drupal/drupal drupal8 --stability stable --no-interaction
-    working_dir: /var/www/html
+    working_dir: "{{ drupal_base_path }}/.."
     prefer_dist: yes
 
 - name: Install Drush with Composer
+  become: false    
   composer:
      command: require 
      arguments: drush/drush
-     working_dir: "{{ drupal_composer_path }}"
-  become: false    
+     working_dir: "{{ drupal_base_path }}"

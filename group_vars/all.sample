@@ -13,6 +13,7 @@ ansible_become_pass: password123
 #
 
 apache_group: www-data
+
 apache_sites_available: /etc/apache2/sites-available
 apache_sites_enabled: /etc/apache2/sites-enabled
 
@@ -34,7 +35,7 @@ db_user_perms: SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPOR
 # Drupal
 #
 
-drupal_composer_path: /var/www/html/drupal8
+drupal_base_path: /var/www/drupal8
 
 drupal_trusted_host_pattern: ^sub\.domain\.com$
 

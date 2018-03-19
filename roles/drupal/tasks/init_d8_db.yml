@@ -4,9 +4,9 @@
   stat: path="~/.d8-db-initialized"
   register: db_initialized    
 
-- name: Initialize default D8 table structure using drush
+- name: Initialize default D8 table structure using Drush
   become: false
-  command: "{{ drupal_composer_path }}/vendor/drush/drush/drush site-install {{ drupal_profile }} --account-name={{ drupal_admin }} --account-pass={{ drupal_admin_password }} --site-name='{{ drupal_sitename }}' --site-mail={{ drupal_email }} --locale={{ drupal_region }} --db-url=mysql://{{ db_user }}:{{ db_user_password }}@localhost:{{ db_port }}/{{ db_name }}"
+  command: "{{ drupal_base_path }}/vendor/drush/drush/drush site-install {{ drupal_profile }} --account-name={{ drupal_admin }} --account-pass={{ drupal_admin_password }} --site-name='{{ drupal_sitename }}' --site-mail={{ drupal_email }} --locale={{ drupal_region }} --db-url=mysql://{{ db_user }}:{{ db_user_password }}@localhost:{{ db_port }}/{{ db_name }}"
   when: not db_initialized.stat.exists
 
 - name: Write Drupal ~/.d8-db-initialized

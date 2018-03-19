@@ -3,12 +3,12 @@
 	#ServerName www.example.com
 
 	ServerAdmin changeme@test.org
-	DocumentRoot /var/www/html/drupal8
+	DocumentRoot {{ drupal_base_path }}
 
 	ErrorLog ${APACHE_LOG_DIR}/error.log
 	CustomLog ${APACHE_LOG_DIR}/access.log combined
 
-	<Directory "/var/www/html/drupal8">
+	<Directory {{ drupal_base_path }}>
  		AllowOverride All
 	</Directory>
 
