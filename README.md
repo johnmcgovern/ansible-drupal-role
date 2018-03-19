@@ -2,7 +2,7 @@
 
 This is an Ansible role that installs a default Drupal 8 instance and all required configuration and dependancies to support a base Drupal 8 instance. At a high level, this role installs:
 
-- apache2
+- apache2 or nginx
 - php
 - mariadb
 - composer

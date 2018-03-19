@@ -7,11 +7,16 @@
     state: absent
     update_cache: yes
 
-
-- name: Install http and php etc
+- name: Install Apache2 and Apache2 modules
   apt: name={{ item }} state=present
   with_items:
    - apache2
+   - libapache2-mod-php
+  when: web_server == "apache"
+
+- name: Install PHP and PHP modules
+  apt: name={{ item }} state=present
+  with_items:
    - php
    - php-mysql
    - php-xml
@@ -21,7 +26,6 @@
    - php-simplexml 
    - php-xml
    - php-curl
-   - libapache2-mod-php
    - software-properties-common
   notify:
    - restart apache2   

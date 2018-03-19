@@ -9,6 +9,13 @@ ansible_become_pass: password123
 
 
 #
+# Web Server Selector (apache or nginx)
+#
+
+web_server: apache   # apache by default, or swtich to nginx
+
+
+#
 # Apache2
 #
 
@@ -16,6 +23,11 @@ apache_group: www-data
 
 apache_sites_available: /etc/apache2/sites-available
 apache_sites_enabled: /etc/apache2/sites-enabled
+
+
+#
+# Nginx
+#
 
 
 # 
@@ -53,15 +65,15 @@ drupal_admin_password: password123
 #
 
 drupal_install_modules:
+    - token
     - schema_metatag
     - ctools
-    - token
     - pathauto
     - metatag
 
 drupal_enable_modules:
+    - token
     - schema_metatag
     - ctools
-    - token
     - pathauto
     - metatag    

@@ -1,5 +1,5 @@
 ---
 
-- import_tasks: apache2_php_install.yml
+- import_tasks: webserver_php_install.yml
 
-- import_tasks: apache2_vhost_config.yml
+- import_tasks: webserver_vhost_config.yml
