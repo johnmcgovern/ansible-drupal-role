@@ -8,7 +8,7 @@ This is an Ansible role that installs a default Drupal 8 instance and all requir
 - composer
 - drupal 8
 - drush
-- drupal 8 modules as specific in group_vars/all
+- drupal 8 modules as specified in group_vars/all
 
 ### Setup
 
@@ -19,15 +19,21 @@ This is an Ansible role that installs a default Drupal 8 instance and all requir
 
 ### Usage
 
-1. Install ansible
+1. Install ansible:
  
 		- sudo apt-get install ansible (Ubuntu) 
 		- brew install ansible (macOS)
 		
 2. git clone this project
 3. Navigate to playbook base directory
-4. ansible-playbook -i hosts site.yml
-5. ansible-playbook -i hosts --limit=host1 site.yml  #limits to a subset of hosts
+4. Run the ansible playbook:
+
+	- ansible-playbook -i hosts site.yml
+	
+5. Run the ansible playbook limited to certain hosts:
+
+	- ansible-playbook -i hosts --limit=host1 site.yml  #limits to a subset of hosts
+
 
 ### Requirements
 
