@@ -14,8 +14,7 @@
    - unzip
    - net-tools
 
-
-- name: Add ansible_user to www-data to permissions work for updates
+- name: Add ansible_user to www-data group
   user:
     name: "{{ ansible_user }}"
     groups: www-data
