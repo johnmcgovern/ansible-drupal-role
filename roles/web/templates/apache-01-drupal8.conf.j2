@@ -1,8 +1,8 @@
 <VirtualHost *:80>
 
-	#ServerName www.example.com
+	ServerName {{ webserver_sitename}}
 
-	ServerAdmin changeme@test.org
+	ServerAdmin {{ webserver_email}}
 	DocumentRoot {{ drupal_base_path }}
 
 	ErrorLog ${APACHE_LOG_DIR}/error.log

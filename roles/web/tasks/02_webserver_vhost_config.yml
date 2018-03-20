@@ -1,16 +1,46 @@
 ---
 
-- name: Write Apache2 vhost conf file
-  template: src=01-drupal8.conf.j2 dest={{ apache_sites_available }}/01-drupal8.conf
+#
+# Apache
+#
 
-- name: Remove default vhost from sites-enabled
+- name: Write Apache2 vhost conf file
+  template: src=apache-01-drupal8.conf.j2 dest={{ apache_sites_available }}/01-drupal8.conf
+  when: webserver_type == "apache"
+
+- name: Remove Apache2 default vhost from sites-enabled
   file:
     path: "{{ apache_sites_enabled }}/000-default.conf"
     state: absent
+  when: webserver_type == "apache"    
 
-- name: Create sites-enabled symlink for new vhosts
+- name: Create Apache2 sites-enabled symlink for new vhosts
   file: 
     src: "{{ apache_sites_available }}/01-drupal8.conf"
     dest: "{{ apache_sites_enabled }}/01-drupal8.conf"
     state: link 
   notify: restart apache2  
+  when: webserver_type == "apache"
+
+
+#
+# Nginx
+#
+
+- name: Write Nginx conf file
+  template: src=nginx-drupal8.j2 dest={{ nginx_sites_available }}/drupal8
+  when: webserver_type == "nginx"
+
+- name: Remove Nginx default conf from sites-enabled
+  file:
+    path: "{{ nginx_sites_enabled }}/default"
+    state: absent
+  when: webserver_type == "nginx"    
+
+- name: Create sites-enabled symlink for new vhosts
+  file: 
+    src: "{{ nginx_sites_available }}/drupal8"
+    dest: "{{ nginx_sites_enabled }}/drupal8"
+    state: link 
+  notify: restart nginx  
+  when: webserver_type == "nginx"

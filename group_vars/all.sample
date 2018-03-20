@@ -9,10 +9,13 @@ ansible_become_pass: password123
 
 
 #
-# Web Server Selector (apache or nginx)
+# Web Server Common 
 #
 
-web_server: apache   # apache by default, or swtich to nginx
+webserver_type: apache   # (apache or nginx)
+
+webserver_sitename: mysite.example.com
+webserver_email: example@example.com
 
 
 #
@@ -28,6 +31,9 @@ apache_sites_enabled: /etc/apache2/sites-enabled
 #
 # Nginx
 #
+
+nginx_sites_available: /etc/nginx/sites-available
+nginx_sites_enabled: /etc/nginx/sites-enabled
 
 
 # 
@@ -49,10 +55,10 @@ db_user_perms: SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPOR
 
 drupal_base_path: /var/www/drupal8
 
-drupal_trusted_host_pattern: ^sub\.domain\.com$
+drupal_trusted_host_pattern: ^mysite\.example\.com$   # regular expression
 
 drupal_sitename: Drupal Test Site
-drupal_email: test@test.org
+drupal_email: example@example.com
 drupal_region: en
 drupal_profile: standard
 

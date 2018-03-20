@@ -12,13 +12,20 @@
   with_items:
    - apache2
    - libapache2-mod-php
-  when: web_server == "apache"
+  when: webserver_type == "apache"
+
+- name: Install Nginx and Nginx modules
+  apt: name={{ item }} state=present
+  with_items:
+   - nginx
+  when: webserver_type == "nginx"  
 
 - name: Install PHP and PHP modules
   apt: name={{ item }} state=present
   with_items:
    - php
    - php-mysql
+   - php-fpm
    - php-xml
    - php-mbstring
    - php-dom
@@ -26,9 +33,11 @@
    - php-simplexml 
    - php-xml
    - php-curl
-   - software-properties-common
-  notify:
-   - restart apache2   
+   - software-properties-common  
+
+- name: Resgister the PHP FPM socket path for use in Nginx conf template
+  shell: ls /var/run/php/php*.sock
+  register: php_fpm_socket_path
 
 - name: Add ppa:ondrej/php repo
   apt_repository:
@@ -51,3 +60,14 @@
   apache2_module:
     name: rewrite
     state: present
+  when: webserver_type == "apache" 
+
+# - name: Restart Apache2
+#   notify:
+#    - restart apache2     
+#   when: webserver_type == "apache"  
+   
+# - name: Restart Nginx
+#   notify:
+#    - restart nginx     
+#   when: webserver_type == "nginx" 

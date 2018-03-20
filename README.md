@@ -55,7 +55,6 @@ This role is tested on:
 
 - Enable php.ini best-practices and tunning for group_vars/all
 - Fix password salt randomness generation (currently static)
-- Allow apache2 to be swapped out for nginx
 - Fix the ability to seperate Web and DB server (broken now)
 
 ### Contact
