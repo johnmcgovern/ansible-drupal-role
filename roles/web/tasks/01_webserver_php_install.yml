@@ -61,13 +61,3 @@
     name: rewrite
     state: present
   when: webserver_type == "apache" 
-
-# - name: Restart Apache2
-#   notify:
-#    - restart apache2     
-#   when: webserver_type == "apache"  
-   
-# - name: Restart Nginx
-#   notify:
-#    - restart nginx     
-#   when: webserver_type == "nginx" 
