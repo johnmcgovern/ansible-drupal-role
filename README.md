@@ -23,9 +23,16 @@ This is an Ansible role that installs a default Drupal 8 instance and all requir
  
 		- sudo apt-get install ansible (Ubuntu) 
 		- brew install ansible (macOS)
-		
+
+
 2. git clone this project
+
+		- git clone https://github.com/johnmcgovern/ansible-drupal-role.git	
+	
 3. Navigate to playbook base directory
+
+		- cd ./ansible-drupal-role
+	
 4. Run the ansible playbook:
 
 		- ansible-playbook -i hosts site.yml
