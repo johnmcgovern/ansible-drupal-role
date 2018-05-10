@@ -75,6 +75,7 @@ This role is tested on:
 
 - Ubuntu 16.04.4 (LTS)
 - Ubuntu 17.10
+- Ubuntu 18.04
 
 
 ### Notes
