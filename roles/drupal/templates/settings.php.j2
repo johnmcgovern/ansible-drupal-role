@@ -27,8 +27,9 @@ $databases['default']['default'] = array (
   'driver' => 'mysql',
 );
 
-$settings['trusted_host_patterns'] = [
-  '{{ drupal_trusted_host_pattern }}',
-];
-
 $settings['install_profile'] = 'standard';
+
+# Uncomment to enable trusted host pattern protection
+# $settings['trusted_host_patterns'] = [
+#  '{{ drupal_trusted_host_pattern }}',
+# ];

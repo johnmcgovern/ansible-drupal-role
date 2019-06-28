@@ -55,8 +55,6 @@ db_user_perms: SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPOR
 
 drupal_base_path: /var/www/drupal8
 
-drupal_trusted_host_pattern: ^mysite\.example\.com$   # regular expression
-
 drupal_sitename: Drupal Test Site
 drupal_email: example@example.com
 drupal_region: en
@@ -64,6 +62,10 @@ drupal_profile: standard
 
 drupal_admin: admin
 drupal_admin_password: password123
+
+# You must uncomment a setting in roles/drupal/tasks/03_configure_d8_files_settings.yml for this variable to be used. 
+# Disabled by default as it makes the site unreachable if the hostname is not set correctly upfront.
+drupal_trusted_host_pattern: ^mysite\.example\.com$   # regular expression
 
 
 #

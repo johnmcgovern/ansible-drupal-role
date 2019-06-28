@@ -1,5 +1,23 @@
 ---
 
+- name: Add bionic universe repository for Ubuntu Bionic (required for PHP modules)
+  apt_repository: 
+    repo: deb http://archive.ubuntu.com/ubuntu bionic universe
+    state: present
+  when: ansible_distribution_release == 'bionic'
+
+- name: Add bionic-security universe repository for Ubuntu Bionic 
+  apt_repository: 
+    repo: deb http://archive.ubuntu.com/ubuntu bionic-security universe (required for PHP modules)
+    state: present
+  when: ansible_distribution_release == 'bionic'  
+
+- name: Add bionic-updates universe repository for Ubuntu Bionic (required for PHP modules)
+  apt_repository: 
+    repo: deb http://archive.ubuntu.com/ubuntu bionic-updates universe
+    state: present
+  when: ansible_distribution_release == 'bionic'  
+
 - name: Update apt package repos (apt-get update)
   apt:
     update_cache: yes
