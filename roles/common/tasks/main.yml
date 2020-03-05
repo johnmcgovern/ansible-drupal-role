@@ -23,14 +23,14 @@
     update_cache: yes
 
 - name: Install python modules and git
-  apt: name={{ item }} state=present
-  with_items:
-   - python
-   - python-pip
-   - python-dev
-   - git
-   - unzip
-   - net-tools
+  apt:
+    pkg:
+    - python
+    - python-pip
+    - python-dev
+    - git
+    - unzip
+    - net-tools
 
 - name: Add ansible_user to www-data group
   user:

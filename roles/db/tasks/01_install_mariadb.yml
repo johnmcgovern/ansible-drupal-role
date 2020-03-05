@@ -1,11 +1,11 @@
 ---
 
 - name: Install MariaDB server and client
-  apt: name={{ item }} state=present
-  with_items:
-   - mariadb-server
-   - mariadb-client
-   - libmysqlclient-dev
+  apt: 
+    pkg:
+    - mariadb-server
+    - mariadb-client
+    - libmysqlclient-dev
 
 - name: Install mysql-python
   pip:

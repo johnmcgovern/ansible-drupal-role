@@ -8,32 +8,32 @@
     update_cache: yes
 
 - name: Install Apache2 and Apache2 modules
-  apt: name={{ item }} state=present
-  with_items:
-   - apache2
-   - libapache2-mod-php
+  apt:
+    pkg:
+    - apache2
+    - libapache2-mod-php
   when: webserver_type == "apache"
 
 - name: Install Nginx and Nginx modules
-  apt: name={{ item }} state=present
-  with_items:
-   - nginx
+  apt:
+    pkg:
+    - nginx
   when: webserver_type == "nginx"  
 
 - name: Install PHP and PHP modules
-  apt: name={{ item }} state=present
-  with_items:
-   - php
-   - php-mysql
-   - php-fpm
-   - php-xml
-   - php-mbstring
-   - php-dom
-   - php-gd
-   - php-simplexml 
-   - php-xml
-   - php-curl
-   - software-properties-common  
+  apt:
+    pkg:
+    - php
+    - php-mysql
+    - php-fpm
+    - php-xml
+    - php-mbstring
+    - php-dom
+    - php-gd
+    - php-simplexml 
+    - php-xml
+    - php-curl
+    - software-properties-common  
 
 - name: Resgister the PHP FPM socket path for use in Nginx conf template
   shell: ls /var/run/php/php*.sock
