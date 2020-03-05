@@ -10,7 +10,7 @@
 
 - name: Enable Drupal modules with Drush
   become: false
-  command: "{{ drupal_base_path }}/vendor/drush/drush/drush en {{ item }}"
+  command: "{{ drupal_base_path }}/vendor/drush/drush/drush en {{ item }} --no-interaction"
   with_items: "{{ drupal_enable_modules }}"
 
 - name: Run cron
