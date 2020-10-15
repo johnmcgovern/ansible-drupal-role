@@ -7,10 +7,23 @@
     - mariadb-client
     - libmysqlclient-dev
 
-- name: Install mysql-python
+- name: Install PyMySQL
   pip:
-    name: MySQL-python
+    name: PyMySQL
 
 - name: Start MariaDB Service
   service: name={{ db_service }} state=started enabled=yes
 
+- name: Set a password for the MariaDB root user
+  mysql_user:
+    # you can get socket path from /etc/mysql/mysql.conf.d/mysqld.cnf
+    login_unix_socket: /run/mysqld/mysqld.sock  # default path
+    name: root
+    password: "{{ db_root_password }}"
+    priv: '*.*:ALL,GRANT'
+    state: present
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    check_implicit_admin: yes
+  become: yes
+  become_user: root

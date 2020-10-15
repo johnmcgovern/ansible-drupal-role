@@ -1,6 +1,6 @@
 ---
 
-- name: Check for D8 Install
+- name: Check for Drupal Install
   stat: 
     path: "{{ drupal_base_path }}/composer.json"
   register: composer_run    
@@ -11,21 +11,21 @@
     path: "{{ drupal_base_path }}"
     state: absent
 
-- name: Create D8 base directory before Composer run (using this to allow us to only use one path var)
+- name: Create Drupal base directory before Composer run
   file:
     path: "{{ drupal_base_path }}"
     state: directory
-    owner: "{{ ansible_user }}"    
+    owner: "{{ apache_user }}"    
     group: "{{ apache_group }}"
 
-- name: Install Drupal 8 with Composer
-  become: false
-  when: not composer_run.stat.exists
+- name: Install Drupal with Composer
   composer:
     command: create-project
-    arguments: drupal/drupal drupal8 --stability stable --no-interaction
+    arguments: drupal/recommended-project drupal --stability stable --no-interaction
     working_dir: "{{ drupal_base_path }}/.."
     prefer_dist: yes
+  when: not composer_run.stat.exists
+  become: true
 
 - name: Install Drush with Composer
   become: false    
@@ -33,3 +33,12 @@
      command: require 
      arguments: drush/drush
      working_dir: "{{ drupal_base_path }}"
+
+- name: Set {{ drupal_base_path }} owner & group recursively
+  file:
+    path: "{{ drupal_base_path }}"
+    state: directory
+    owner: "{{ apache_user }}"    
+    group: "{{ apache_group }}"
+    recurse: yes
+  become: yes       

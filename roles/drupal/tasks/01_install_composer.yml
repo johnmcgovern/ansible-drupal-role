@@ -14,7 +14,7 @@
   file:
     path: ~/.composer
     state: directory
-    owner: "{{ ansible_user }}"
+    owner: "{{ apache_user }}"
     group: "{{ apache_group }}"
     mode: 0770
     recurse: yes
@@ -24,7 +24,7 @@
   file:
     path: ~/.drush
     state: directory
-    owner: "{{ ansible_user }}"
+    owner: "{{ apache_user }}"
     group: "{{ apache_group }}"
     mode: 0770
     recurse: yes    

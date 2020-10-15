@@ -25,15 +25,24 @@
 - name: Install python modules and git
   apt:
     pkg:
-    - python
-    - python-pip
-    - python-dev
+    - python3
+    - python3-pip
+    - python3-dev
     - git
     - unzip
     - net-tools
 
-- name: Add ansible_user to www-data group
+- name: Add "{{ apache_group }}" group
+  group:
+    name: "{{ apache_group }}"
+    state: present  
+  become: yes  
+
+- name: Add "{{ apache_user }}" user with the home dir /home/{{ os_user }}/ (so we can set ulimits)
   user:
-    name: "{{ ansible_user }}"
-    groups: www-data
-    append: yes   
+    name: "{{ apache_user }}"
+    group: "{{ apache_group }}"
+    home: /home/{{ apache_user }}/
+    shell: /bin/bash
+    comment: WWW Data User
+  become: yes

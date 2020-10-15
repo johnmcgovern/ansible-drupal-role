@@ -12,28 +12,13 @@ ansible_become_pass: password123
 # Web Server Common 
 #
 
-webserver_type: apache   # (apache or nginx)
+webserver_type: nginx   # nginx(default) or apache
 
 webserver_sitename: mysite.example.com
 webserver_email: example@example.com
 
-
-#
-# Apache2
-#
-
+apache_user: www-data
 apache_group: www-data
-
-apache_sites_available: /etc/apache2/sites-available
-apache_sites_enabled: /etc/apache2/sites-enabled
-
-
-#
-# Nginx
-#
-
-nginx_sites_available: /etc/nginx/sites-available
-nginx_sites_enabled: /etc/nginx/sites-enabled
 
 
 # 
@@ -43,22 +28,23 @@ nginx_sites_enabled: /etc/nginx/sites-enabled
 db_service: mysql
 db_port: 3306
 
-db_name: drupal8
+db_name: drupal
 db_user: drupal_user
 db_user_password: password123
 db_user_perms: SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES
+
+db_root_password: password123
 
 
 #
 # Drupal
 #
 
-drupal_base_path: /var/www/drupal8
+drupal_base_path: /var/www/drupal9
 
 drupal_sitename: Drupal Test Site
 drupal_email: example@example.com
 drupal_region: en
-drupal_profile: standard
 
 drupal_admin: admin
 drupal_admin_password: password123

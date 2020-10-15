@@ -1,9 +1,22 @@
 ---
 
 - name: Create Drupal Database
-  mysql_db: name={{ db_name }} state=present
+  mysql_db: 
+    name: "{{ db_name }}"
+    state: present
+    login_user: root
+    login_password: "{{ db_root_password }}"
+  become: true
+  become_user: root    
 
 - name: Create Drupal DB User
-  mysql_user: name={{ db_user }} password={{ db_user_password }} priv={{ db_name }}.*:{{ db_user_perms }} host='localhost' state=present 
+  mysql_user: 
+    name: "{{ db_user }}" 
+    password: "{{ db_user_password }}" 
+    priv: "{{ db_name }}.*:{{ db_user_perms }}" 
+    host: localhost 
+    state: present 
+    login_user: root
+    login_password: "{{ db_root_password }}"
   become: true
   become_user: root   

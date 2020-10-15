@@ -16,7 +16,7 @@
   roles:
     - db
 
-- name: Deploy a base Drupal 8 installation
+- name: Deploy a base Drupal installation
   hosts: webservers
   roles:
     - drupal    

@@ -3,7 +3,7 @@
 	ServerName {{ webserver_sitename}}
 
 	ServerAdmin {{ webserver_email}}
-	DocumentRoot {{ drupal_base_path }}
+	DocumentRoot {{ drupal_base_path }}/web
 
 	ErrorLog ${APACHE_LOG_DIR}/error.log
 	CustomLog ${APACHE_LOG_DIR}/access.log combined

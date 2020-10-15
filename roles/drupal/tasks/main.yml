@@ -2,11 +2,11 @@
 
 - import_tasks: 01_install_composer.yml
 
-- import_tasks: 02_install_drupal8.yml
+- import_tasks: 02_install_drupal.yml
 
-- import_tasks: 03_configure_d8_files_settings.yml
+- import_tasks: 03_configure_drupal_files_settings.yml
 
-- import_tasks: 04_init_d8_db.yml
+- import_tasks: 04_init_drupal_db.yml
 
 - import_tasks: 05_install_modules.yml
 
