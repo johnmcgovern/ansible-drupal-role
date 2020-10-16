@@ -33,6 +33,7 @@
     - php-simplexml 
     - php-xml
     - php-curl
+    - php-apcu
     - software-properties-common  
 
 - name: Resgister the PHP FPM socket path for use in Nginx conf template
