@@ -86,7 +86,6 @@ Ubuntu 20.04 contains a modern version of PHP by default (PHP 7.4.x). Drupal 9 a
 ### ToDo
 
 - Enable php.ini best-practices and tunning for group_vars/all
-- Fix hash salt randomness generation (currently static)
 - Fix the ability to seperate Web and DB server (currently broken)
 
 
