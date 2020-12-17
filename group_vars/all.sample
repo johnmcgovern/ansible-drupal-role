@@ -40,7 +40,7 @@ db_root_password: password123
 # Drupal
 #
 
-drupal_base_path: /var/www/drupal9
+drupal_base_path: /var/www/drupal
 
 drupal_sitename: Drupal Test Site
 drupal_email: example@example.com

@@ -6,10 +6,10 @@
   register: composer_run    
 
 - name: Make sure drupal_base_path doesn't exist (first run) as Composer needs a blank directory
-  when: not composer_run.stat.exists  
   file:
     path: "{{ drupal_base_path }}"
     state: absent
+  when: not composer_run.stat.exists  
 
 - name: Create Drupal base directory before Composer run
   file:
@@ -18,21 +18,18 @@
     owner: "{{ apache_user }}"    
     group: "{{ apache_group }}"
 
-- name: Install Drupal with Composer
-  composer:
-    command: create-project
-    arguments: drupal/recommended-project drupal --stability stable --no-interaction
-    working_dir: "{{ drupal_base_path }}/.."
-    prefer_dist: yes
+- name: Install Drupal with Composer (via command module due to issue with composer module)
+  command: 
+    cmd: composer create-project drupal/recommended-project drupal --stability stable --no-interaction
+    chdir: "{{ drupal_base_path }}/.."
   when: not composer_run.stat.exists
   become: true
 
-- name: Install Drush with Composer
-  become: false    
-  composer:
-     command: require 
-     arguments: drush/drush
-     working_dir: "{{ drupal_base_path }}"
+- name: Install Drush with Composer (via command module due to issue with composer module)
+  command: 
+    cmd: composer require drush/drush --no-interaction
+    chdir: "{{ drupal_base_path }}"
+  become: true 
 
 - name: Set {{ drupal_base_path }} owner & group recursively
   file:

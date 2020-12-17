@@ -1,16 +1,15 @@
 ---
 
-- name: Install Drupal modules with Composer
+- name: Install Drupal modules with Composer (via command module due to issue with composer module)
+  command:
+     cmd: "composer require drupal/{{ item }} --no-interaction"
+     chdir: "{{ drupal_base_path }}"
   become: false    
-  composer:
-     command: require 
-     arguments: drupal/{{ item }}
-     working_dir: "{{ drupal_base_path }}"
-  with_items: "{{ drupal_install_modules }}"
+  with_items: "{{ drupal_install_modules }}"  
 
 - name: Enable Drupal modules with Drush
-  become: false
   command: "{{ drupal_base_path }}/vendor/drush/drush/drush en {{ item }} --no-interaction"
+  become: false
   with_items: "{{ drupal_enable_modules }}"
 
 - name: Run cron
