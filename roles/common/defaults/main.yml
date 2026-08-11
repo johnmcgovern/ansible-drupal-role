@@ -1,0 +1,14 @@
+---
+# Web server run-as identity. On Ubuntu both nginx and apache2 run as www-data,
+# and the packages create this user/group themselves.
+webserver_user: www-data
+webserver_group: www-data
+
+# Packages needed by later roles (Composer needs unzip/git, MySQL modules need
+# python3-pymysql, which is installed by the db role).
+common_packages:
+  - ca-certificates
+  - curl
+  - git
+  - python3
+  - unzip

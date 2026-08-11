@@ -1,39 +1,49 @@
+---
+#
+# Copy to group_vars/all and edit. Anything marked SECRET below should live in
+# an ansible-vault encrypted file rather than here in plaintext -- see README.
+#
 
 #
-# Ansible SSH Connection
+# Ansible connection
 #
 
 ansible_user: username
-ansible_become: true
-ansible_become_pass: password123
 
 
 #
-# Web Server Common 
+# Web server
 #
 
-webserver_type: nginx   # nginx(default) or apache
+webserver_type: nginx   # nginx (default) or apache
 
 webserver_sitename: mysite.example.com
 webserver_email: example@example.com
 
-apache_user: www-data
-apache_group: www-data
+webserver_max_body_size: 64M
+
+# The account the web server runs as. Ubuntu's nginx and apache2 packages both
+# use www-data; there is rarely a reason to change this.
+webserver_user: www-data
+webserver_group: www-data
 
 
-# 
+#
 # MariaDB
 #
+# The MariaDB root account authenticates via the unix_socket plugin, so there
+# is no db_root_password. Administrative tasks connect over the local socket as
+# system root, which is stronger than storing a root password here.
+#
 
-db_service: mysql
+db_service: mariadb
+db_host: localhost
 db_port: 3306
 
 db_name: drupal
 db_user: drupal_user
-db_user_password: password123
-db_user_perms: SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES
-
-db_root_password: password123
+db_user_password: CHANGEME   # SECRET
+db_user_perms: "SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES"
 
 
 #
@@ -47,27 +57,31 @@ drupal_email: example@example.com
 drupal_region: en
 
 drupal_admin: admin
-drupal_admin_password: password123
+drupal_admin_password: CHANGEME   # SECRET
 
-# You must uncomment a setting in roles/drupal/tasks/03_configure_d8_files_settings.yml for this variable to be used. 
-# Disabled by default as it makes the site unreachable if the hostname is not set correctly upfront.
-drupal_trusted_host_pattern: ^mysite\.example\.com$   # regular expression
+# Host header protection. Leave as an empty list to disable. When set, requests
+# whose Host header matches none of these regular expressions are rejected, so
+# an incorrect value makes the site unreachable -- set it once the hostname is
+# settled.
+drupal_trusted_host_patterns: []
+# drupal_trusted_host_patterns:
+#   - '^mysite\.example\.com$'
 
 
 #
-# Drupal Modules
+# Drupal modules
 #
 
 drupal_install_modules:
-    - token
-    - schema_metatag
-    - ctools
-    - pathauto
-    - metatag
+  - token
+  - schema_metatag
+  - ctools
+  - pathauto
+  - metatag
 
 drupal_enable_modules:
-    - token
-    - schema_metatag
-    - ctools
-    - pathauto
-    - metatag    
+  - token
+  - schema_metatag
+  - ctools
+  - pathauto
+  - metatag

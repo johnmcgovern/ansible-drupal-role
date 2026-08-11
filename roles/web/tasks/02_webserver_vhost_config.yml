@@ -5,22 +5,36 @@
 #
 
 - name: Write Apache2 vhost conf file
-  template: src=apache-01-drupal.conf.j2 dest=/etc/apache2/sites-available/01-drupal.conf
-  when: webserver_type == "apache"
+  ansible.builtin.template:
+    src: apache-01-drupal.conf.j2
+    dest: /etc/apache2/sites-available/01-drupal.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: webserver_type == 'apache'
+  notify: Restart apache2
 
-- name: Remove Apache2 default vhost from sites-enabled
-  file:
-    path: "/etc/apache2/sites-available/000-default.conf"
+- name: Disable the Apache2 default vhost
+  ansible.builtin.file:
+    path: /etc/apache2/sites-enabled/000-default.conf
     state: absent
-  when: webserver_type == "apache"    
+  when: webserver_type == 'apache'
+  notify: Restart apache2
 
-- name: Create Apache2 sites-enabled symlink for new vhosts
-  file: 
-    src: "/etc/apache2/sites-available/01-drupal.conf"
-    dest: "/etc/apache2/sites-enabled/01-drupal.conf"
-    state: link 
-  notify: restart apache2  
-  when: webserver_type == "apache"
+- name: Enable the Drupal Apache2 vhost
+  ansible.builtin.file:
+    src: /etc/apache2/sites-available/01-drupal.conf
+    dest: /etc/apache2/sites-enabled/01-drupal.conf
+    state: link
+  when: webserver_type == 'apache'
+  notify: Restart apache2
+
+- name: Ensure Apache2 is running and enabled
+  ansible.builtin.service:
+    name: apache2
+    state: started
+    enabled: true
+  when: webserver_type == 'apache'
 
 
 #
@@ -28,19 +42,41 @@
 #
 
 - name: Write Nginx conf file
-  template: src=nginx-drupal.j2 dest=/etc/nginx/sites-available/drupal
-  when: webserver_type == "nginx"
+  ansible.builtin.template:
+    src: nginx-drupal.j2
+    dest: /etc/nginx/sites-available/drupal
+    owner: root
+    group: root
+    mode: "0644"
+  when: webserver_type == 'nginx'
+  notify: Restart nginx
 
-- name: Remove Nginx default conf from sites-enabled
-  file:
-    path: "/etc/nginx/sites-enabled/default"
+- name: Disable the Nginx default site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
     state: absent
-  when: webserver_type == "nginx"    
+  when: webserver_type == 'nginx'
+  notify: Restart nginx
 
-- name: Create sites-enabled symlink for new vhosts
-  file: 
-    src: "/etc/nginx/sites-available/drupal"
-    dest: "/etc/nginx/sites-enabled/drupal"
-    state: link 
-  notify: restart nginx  
-  when: webserver_type == "nginx"
+- name: Enable the Drupal Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/drupal
+    dest: /etc/nginx/sites-enabled/drupal
+    state: link
+  when: webserver_type == 'nginx'
+  notify: Restart nginx
+
+# Runs after the symlink is in place so it tests the configuration nginx will
+# actually load. A template-level `validate` would test the pre-change state.
+- name: Validate the Nginx configuration
+  ansible.builtin.command:
+    cmd: nginx -t
+  changed_when: false
+  when: webserver_type == 'nginx'
+
+- name: Ensure Nginx is running and enabled
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+  when: webserver_type == 'nginx'

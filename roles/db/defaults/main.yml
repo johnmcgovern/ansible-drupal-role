@@ -1,0 +1,14 @@
+---
+db_service: mariadb
+db_port: 3306
+
+db_name: drupal
+db_user: drupal_user
+db_user_perms: "SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES"
+
+# Unix socket the local MariaDB server listens on. The root account authenticates
+# through the unix_socket plugin, so no root password is stored anywhere.
+db_login_unix_socket: /run/mysqld/mysqld.sock
+
+# db_user_password has no default on purpose -- an unset password should fail
+# loudly rather than silently create a predictable account.

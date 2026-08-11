@@ -1,0 +1,15 @@
+---
+profile: production
+
+exclude_paths:
+  - .git/
+  - .github/
+
+skip_list:
+  # These roles share a single user-facing configuration surface documented in
+  # group_vars/all.sample -- webserver_type, drupal_base_path, db_host and
+  # friends are consumed by more than one role by design. Role-prefixing them
+  # (web_webserver_type, drupal_drupal_base_path) would make the sample file
+  # worse to read and would not make the variables any less shared. The role
+  # defaults exist only as fallbacks for the shared names.
+  - var-naming[no-role-prefix]

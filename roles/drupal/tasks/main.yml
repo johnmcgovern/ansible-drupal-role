@@ -1,12 +1,27 @@
 ---
 
-- import_tasks: 01_install_composer.yml
+- name: Assert the required Drupal secrets are set
+  ansible.builtin.assert:
+    that:
+      - drupal_admin_password is defined
+      - drupal_admin_password | length > 0
+      - db_user_password is defined
+      - db_user_password | length > 0
+    fail_msg: >-
+      drupal_admin_password and db_user_password must be set, ideally in an
+      ansible-vault encrypted file. See the README.
 
-- import_tasks: 02_install_drupal.yml
+- name: Install Composer
+  ansible.builtin.import_tasks: 01_install_composer.yml
 
-- import_tasks: 03_configure_drupal_files_settings.yml
+- name: Install Drupal and Drush
+  ansible.builtin.import_tasks: 02_install_drupal.yml
 
-- import_tasks: 04_init_drupal_db.yml
+- name: Configure Drupal files and settings
+  ansible.builtin.import_tasks: 03_configure_drupal_files_settings.yml
 
-- import_tasks: 05_install_modules.yml
+- name: Initialise the Drupal database
+  ansible.builtin.import_tasks: 04_init_drupal_db.yml
 
+- name: Install and enable Drupal modules
+  ansible.builtin.import_tasks: 05_install_modules.yml

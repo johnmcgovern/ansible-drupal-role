@@ -1,41 +1,39 @@
 ---
 
-- name: Check for Drupal Install
-  stat: 
+- name: Check for an existing Drupal codebase
+  ansible.builtin.stat:
     path: "{{ drupal_base_path }}/composer.json"
-  register: composer_run    
+  register: drupal_composer_json
 
-- name: Make sure drupal_base_path doesn't exist (first run) as Composer needs a blank directory
-  file:
-    path: "{{ drupal_base_path }}"
-    state: absent
-  when: not composer_run.stat.exists  
+# NOTE: this deliberately does not wipe drupal_base_path when composer.json is
+# missing. The previous version did, which meant a partially-populated docroot
+# was silently deleted. If the directory exists with unexpected contents,
+# composer will refuse and say so, which is the safer failure.
+- name: Install Drupal with Composer
+  ansible.builtin.command:
+    cmd: >-
+      composer create-project drupal/recommended-project {{ drupal_base_path | basename }}
+      --stability stable --no-interaction
+    chdir: "{{ drupal_base_path | dirname }}"
+  environment: "{{ drupal_composer_env }}"
+  when: not drupal_composer_json.stat.exists
+  changed_when: true
+  notify:
+    - Reset Drupal file ownership
+    - Restore Drupal writable directories
 
-- name: Create Drupal base directory before Composer run
-  file:
-    path: "{{ drupal_base_path }}"
-    state: directory
-    owner: "{{ apache_user }}"    
-    group: "{{ apache_group }}"
+- name: Check for an existing Drush install
+  ansible.builtin.stat:
+    path: "{{ drupal_base_path }}/vendor/bin/drush"
+  register: drush_binary
 
-- name: Install Drupal with Composer (via command module due to issue with composer module)
-  command: 
-    cmd: composer create-project drupal/recommended-project drupal --stability stable --no-interaction
-    chdir: "{{ drupal_base_path }}/.."
-  when: not composer_run.stat.exists
-  become: true
-
-- name: Install Drush with Composer (via command module due to issue with composer module)
-  command: 
+- name: Install Drush with Composer
+  ansible.builtin.command:
     cmd: composer require drush/drush --no-interaction
     chdir: "{{ drupal_base_path }}"
-  become: true 
-
-- name: Set {{ drupal_base_path }} owner & group recursively
-  file:
-    path: "{{ drupal_base_path }}"
-    state: directory
-    owner: "{{ apache_user }}"    
-    group: "{{ apache_group }}"
-    recurse: yes
-  become: yes       
+  environment: "{{ drupal_composer_env }}"
+  when: not drush_binary.stat.exists
+  changed_when: true
+  notify:
+    - Reset Drupal file ownership
+    - Restore Drupal writable directories

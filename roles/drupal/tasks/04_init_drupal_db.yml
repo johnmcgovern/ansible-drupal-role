@@ -1,15 +1,35 @@
 ---
 
-- name: Check if DB has been initialized via ~/.drupal-db-initialized
-  stat: path="~/.drupal-db-initialized"
-  register: db_initialized    
+# Asking Drupal itself whether it is installed is more reliable than the
+# previous ~/.drupal-db-initialized marker file, which was written to root's
+# home directory and so drifted out of sync with the actual site state. A
+# false negative here would re-run site:install and drop a live database.
+- name: Determine whether Drupal is already installed
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} status --field=bootstrap"
+  args:
+    chdir: "{{ drupal_base_path }}"
+  register: drupal_bootstrap
+  changed_when: false
+  failed_when: false
 
-- name: Initialize default Drupal table structure using Drush
-  command: "{{ drupal_base_path }}/vendor/drush/drush/drush site:install --account-name={{ drupal_admin }} --account-pass={{ drupal_admin_password }} --site-name='{{ drupal_sitename }}' --site-mail={{ drupal_email }} --locale={{ drupal_region }} --db-url=mysql://{{ db_user }}:{{ db_user_password }}@localhost:{{ db_port }}/{{ db_name }} --no-interaction"
-  become: true
-  when: not db_initialized.stat.exists
-
-- name: Write Drupal ~/.drupal-db-initialized
-  file: 
-    path: ~/.drupal-db-initialized
-    state: touch
+- name: Initialise the default Drupal table structure with Drush
+  ansible.builtin.command:
+    cmd: >-
+      {{ drupal_drush }} site:install --yes
+      --account-name={{ drupal_admin }}
+      --account-pass={{ drupal_admin_password }}
+      --site-name={{ drupal_sitename | quote }}
+      --site-mail={{ drupal_email }}
+      --locale={{ drupal_region }}
+      --db-url=mysql://{{ db_user }}:{{ db_user_password | urlencode }}@{{ db_host }}:{{ db_port }}/{{ db_name }}
+    chdir: "{{ drupal_base_path }}"
+  when: "'Successful' not in drupal_bootstrap.stdout"
+  changed_when: true
+  no_log: true
+  # site:install writes files/ and the generated twig cache as root. The
+  # handlers hand those back to the web server at the end of the play.
+  notify:
+    - Reset Drupal file ownership
+    - Restore Drupal writable directories
+    - Run Drupal cron

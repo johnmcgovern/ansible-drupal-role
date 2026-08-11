@@ -1,22 +1,30 @@
 ---
-# This playbook deploys the Drupal 8 application stack.
+# Deploys the Drupal application stack on Ubuntu 24.04 LTS.
 
 - name: Apply common configuration to all nodes
   hosts: all
+  become: true
+  gather_facts: true
   roles:
     - common
 
-- name: Configure and deploy the webserver
+- name: Configure and deploy the web server
   hosts: webservers
+  become: true
+  gather_facts: true
   roles:
     - web
 
-- name: Deploy MySQL and configure the database
+- name: Deploy MariaDB and configure the database
   hosts: dbservers
+  become: true
+  gather_facts: true
   roles:
     - db
 
 - name: Deploy a base Drupal installation
   hosts: webservers
+  become: true
+  gather_facts: true
   roles:
-    - drupal    
+    - drupal

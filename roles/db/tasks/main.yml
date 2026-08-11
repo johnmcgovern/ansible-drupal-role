@@ -1,5 +1,7 @@
 ---
 
-- import_tasks: 01_install_mariadb.yml
+- name: Install MariaDB
+  ansible.builtin.import_tasks: 01_install_mariadb.yml
 
-- import_tasks: 02_create_drupal_db.yml
+- name: Create the Drupal database and user
+  ansible.builtin.import_tasks: 02_create_drupal_db.yml

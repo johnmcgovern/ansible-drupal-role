@@ -1,0 +1,49 @@
+---
+drupal_base_path: /var/www/drupal
+
+# Mirrors roles/common/defaults. Role defaults do not carry across plays, and
+# the drupal role runs in its own play.
+webserver_user: www-data
+webserver_group: www-data
+
+drupal_sitename: Drupal Site
+drupal_email: admin@example.com
+drupal_region: en
+
+drupal_admin: admin
+
+# Drupal resolves config_sync_directory relative to the docroot ({{ drupal_base_path }}/web),
+# so '../config/sync' lands at {{ drupal_base_path }}/config/sync -- outside the
+# docroot, which is where it belongs.
+drupal_config_sync_relative: ../config/sync
+drupal_config_sync_path: "{{ drupal_base_path }}/config/sync"
+
+# The hash salt is generated once on the target and read by settings.php at
+# runtime. Keeping it in its own file outside the docroot means re-running this
+# playbook cannot overwrite the value an existing site is already using.
+drupal_hash_salt_file: "{{ drupal_base_path }}/.hash_salt"
+
+drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
+
+# Database host as seen from the web server. Kept as a variable so the web and
+# db tiers can be split across hosts; settings.php no longer hardcodes localhost.
+db_host: localhost
+
+# Host header protection. Empty means disabled -- a misconfigured pattern makes
+# the site unreachable, so it is opt-in. Supply a list of regular expressions.
+drupal_trusted_host_patterns: []
+
+drupal_install_modules: []
+drupal_enable_modules: []
+
+# Pinned upstream installer checksum source. The installer is verified against
+# the SHA-384 that Composer publishes before it is executed.
+composer_installer_sig_url: https://composer.github.io/installer.sig
+
+# Composer runs as root here (it writes into /var/www). Without COMPOSER_HOME it
+# guesses at a cache location, and without ALLOW_SUPERUSER it emits an
+# interactive-looking root warning on every invocation.
+drupal_composer_env:
+  COMPOSER_HOME: /root/.composer
+  COMPOSER_ALLOW_SUPERUSER: "1"
+  COMPOSER_NO_INTERACTION: "1"

@@ -1,64 +1,82 @@
 ---
 
-# @todo figure out why this is required
-- name: 'PRE Remove ppa:ondrej/php repo (pre main package install) as it breaks other php standard package installs down the road'
-  apt_repository:
-    repo: 'ppa:ondrej/php'
-    state: absent
-    update_cache: yes
-
-- name: Install Apache2 and Apache2 modules
-  apt:
-    pkg:
-    - apache2
-    - libapache2-mod-php
-  when: webserver_type == "apache"
-
-- name: Install Nginx and Nginx modules
-  apt:
-    pkg:
-    - nginx
-  when: webserver_type == "nginx"  
+- name: Assert a supported web server was selected
+  ansible.builtin.assert:
+    that:
+      - webserver_type in ['nginx', 'apache']
+    fail_msg: "webserver_type must be 'nginx' or 'apache', got '{{ webserver_type }}'."
 
 - name: Install PHP and PHP modules
-  apt:
-    pkg:
-    - php
-    - php-mysql
-    - php-fpm
-    - php-xml
-    - php-mbstring
-    - php-dom
-    - php-gd
-    - php-simplexml 
-    - php-xml
-    - php-curl
-    - php-apcu
-    - software-properties-common  
+  ansible.builtin.apt:
+    name: "{{ php_packages }}"
+    state: present
 
-- name: Resgister the PHP FPM socket path for use in Nginx conf template
-  shell: ls /var/run/php/php*.sock
-  register: php_fpm_socket_path
+# Everything downstream (the FPM socket path, the service name, the systemd
+# unit to restart) is keyed off the real interpreter version rather than a
+# hardcoded 8.3, so a point release that moves PHP forward does not break this.
+- name: Determine the installed PHP version
+  ansible.builtin.command:
+    cmd: php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
+  register: php_version_result
+  changed_when: false
 
-- name: Add ppa:ondrej/php repo
-  apt_repository:
-    repo: 'ppa:ondrej/php'
+- name: Register the PHP version and derived FPM paths
+  ansible.builtin.set_fact:
+    php_version: "{{ php_version_result.stdout | trim }}"
+    php_fpm_service: "php{{ php_version_result.stdout | trim }}-fpm"
+    php_fpm_socket: "/run/php/php{{ php_version_result.stdout | trim }}-fpm.sock"
 
-- name: 'Install php-uploadporogress which is from a seperate repo'    
-  apt:
-    name: php-uploadprogress
-    update_cache: yes
-  register: uploadprogress_installed
+# Belt and braces against the apache2-via-php-metapackage trap, and against
+# switching webserver_type on an already-provisioned host: whichever server we
+# are not using must not be holding port 80 when the other tries to bind.
+- name: Stop and disable the unselected web server if it is installed
+  ansible.builtin.service:
+    name: "{{ 'apache2' if webserver_type == 'nginx' else 'nginx' }}"
+    state: stopped
+    enabled: false
+  failed_when: false
 
-# @todo figure out why this is required
-- name: 'POST Remove ppa:ondrej/php repo (pre main package install) as it breaks other php standard package installs down the road'
-  apt_repository:
-    repo: 'ppa:ondrej/php'
-    state: absent
-    update_cache: yes
+- name: Install Nginx and PHP-FPM
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - "php{{ php_version }}-fpm"
+    state: present
+  when: webserver_type == 'nginx'
 
-- name: Install apache2 mod-rewrite 
-  apache2_module:
+- name: Install Apache2 and mod_php
+  ansible.builtin.apt:
+    name:
+      - apache2
+      - "libapache2-mod-php{{ php_version }}"
+    state: present
+  when: webserver_type == 'apache'
+
+- name: Enable the Apache rewrite module
+  community.general.apache2_module:
     name: rewrite
     state: present
-  when: webserver_type == "apache" 
+  when: webserver_type == 'apache'
+  notify: Restart apache2
+
+- name: Ensure PHP-FPM is running and enabled
+  ansible.builtin.service:
+    name: "{{ php_fpm_service }}"
+    state: started
+    enabled: true
+  when: webserver_type == 'nginx'
+
+- name: Confirm the PHP-FPM socket exists at the expected path
+  ansible.builtin.stat:
+    path: "{{ php_fpm_socket }}"
+  register: php_fpm_socket_stat
+  when: webserver_type == 'nginx'
+
+- name: Fail early if the PHP-FPM socket is missing
+  ansible.builtin.fail:
+    msg: >-
+      Expected PHP-FPM socket at {{ php_fpm_socket }} but it does not exist.
+      The nginx vhost would return 502 for every request.
+  when:
+    - webserver_type == 'nginx'
+    - not php_fpm_socket_stat.stat.exists

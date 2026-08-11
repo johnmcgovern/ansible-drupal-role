@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: db
+  author: John McGovern
+  description: Installs MariaDB and provisions the Drupal database and application user.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - drupal
+    - mariadb
+    - mysql
+
+dependencies: []

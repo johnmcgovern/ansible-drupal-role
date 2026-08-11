@@ -1,11 +1,15 @@
 <?php
 
-$databases = array();
+// {{ ansible_managed }}
+// Managed by Ansible. Local edits will be overwritten on the next playbook run.
 
-$config_directories = array();
-
-$settings['hash_salt'] = '';
+$databases = [];
 $settings['update_free_access'] = FALSE;
+
+// Read the salt from a file outside the docroot that is generated once on the
+// host. Keeping it out of this template means re-running Ansible cannot
+// invalidate the sessions and one-time login links of a running site.
+$settings['hash_salt'] = trim(file_get_contents('{{ drupal_hash_salt_file }}'));
 
 $settings['file_scan_ignore_directories'] = [
   'node_modules',
@@ -14,20 +18,27 @@ $settings['file_scan_ignore_directories'] = [
 
 $settings['entity_update_batch_size'] = 50;
 
-$settings['config_sync_directory'] = '../config/sync';
+$settings['config_sync_directory'] = '{{ drupal_config_sync_relative }}';
 
-$databases['default']['default'] = array (
+$databases['default']['default'] = [
   'database' => '{{ db_name }}',
   'username' => '{{ db_user }}',
   'password' => '{{ db_user_password }}',
   'prefix' => '',
-  'host' => 'localhost',
+  'host' => '{{ db_host }}',
   'port' => '{{ db_port }}',
-  'namespace' => 'Drupal\\Core\\Database\\Driver\\mysql',
   'driver' => 'mysql',
-);
+  'namespace' => 'Drupal\\mysql\\Driver\\Database\\mysql',
+  'autoload' => 'core/modules/mysql/src/Driver/Database/mysql/',
+];
 
-# Uncomment to enable trusted host pattern protection
-# $settings['trusted_host_patterns'] = [
-#  '{{ drupal_trusted_host_pattern }}',
-# ];
+{% if drupal_trusted_host_patterns | default([]) | length > 0 %}
+$settings['trusted_host_patterns'] = [
+{% for pattern in drupal_trusted_host_patterns %}
+  '{{ pattern }}',
+{% endfor %}
+];
+{% else %}
+// Host header protection is disabled because drupal_trusted_host_patterns is
+// empty. Set it in group_vars to enable -- see README.
+{% endif %}

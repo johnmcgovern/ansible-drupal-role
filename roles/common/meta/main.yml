@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: common
+  author: John McGovern
+  description: Baseline package and identity setup shared by all nodes in the Drupal stack.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - drupal
+    - ubuntu
+
+dependencies: []

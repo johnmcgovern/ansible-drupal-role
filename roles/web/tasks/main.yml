@@ -1,5 +1,7 @@
 ---
 
-- import_tasks: 01_webserver_php_install.yml
+- name: Install the web server and PHP
+  ansible.builtin.import_tasks: 01_webserver_php_install.yml
 
-- import_tasks: 02_webserver_vhost_config.yml
+- name: Configure the web server vhost
+  ansible.builtin.import_tasks: 02_webserver_vhost_config.yml

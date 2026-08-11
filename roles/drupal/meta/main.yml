@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: drupal
+  author: John McGovern
+  description: Installs Composer, Drupal and Drush, initialises the database and enables modules.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - drupal
+    - composer
+    - drush
+
+dependencies: []

@@ -1,4 +1,6 @@
 ---
 
-- name: restart mysql
-  service: name={{ db_service }} state=restarted
+- name: Restart mariadb
+  ansible.builtin.service:
+    name: "{{ db_service }}"
+    state: restarted

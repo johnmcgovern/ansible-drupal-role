@@ -1,96 +1,154 @@
 # Ansible-Drupal-Role
 
-This is an Ansible role that installs a default Drupal instance (latest stable release) with all required configuration and dependancies. At a high level, this role installs:
+Ansible roles that install a default Drupal instance (latest stable release) with all
+required configuration and dependencies. At a high level this installs:
 
-- apache2 or nginx
-- php
-- mariadb
-- composer
-- drush
-- drupal (latest stable verison)
-- drupal modules as specified in group_vars/all
+- nginx (default) or apache2
+- PHP 8.3 + PHP-FPM
+- MariaDB
+- Composer
+- Drush
+- Drupal (latest stable release)
+- Drupal modules as specified in `group_vars/all`
 
-
-### Setup
-
-1. Install ansible:
- 
-		- sudo apt-get install ansible (Ubuntu) 
-		- brew install ansible (macOS)
-
-2. git clone this project
-
-		- git clone https://github.com/johnmcgovern/ansible-drupal-role.git	
-	
-3. Navigate to project base directory
-
-		- cd ./ansible-drupal-role		
-
-4. Copy hosts.sample to hosts
-
-		- cp hosts.sample hosts
-
-5. Edit hosts file to include desired hosts
-
-		- vi hosts
-	
-6. Copy group_vars/all.sample to group_vars/all
-
-		- cp group_vars/all.sample group_vars/all
-
-7. Edit group_vars/all variables as appropriate for your enviornment
-
-		- vi group_vars/all
-
-
-### Usage
-
-1. Ensure that python3 is installed on the targer server(s)
-
-		- sudo apt-get install python3
-	
-2. Navigate to playbook base directory
-
-		- cd ./ansible-drupal-role
-	
-3. Run the ansible playbook:
-
-		- ansible-playbook -i hosts site.yml
-	
-4. Run the ansible playbook limited to certain hosts:
-
-		- ansible-playbook -i hosts --limit=host1 site.yml  #limits to a subset of hosts
-
-
-### Requirements
-
-1. The Ubuntu target server must already have python installed (Ansible needs it to operate):
-
-		- sudo apt-get install python
+The goal is a base Drupal install with no errors on the status report.
 
 
 ### Compatibility
 
-This role is tested on:
+**Ubuntu 24.04 LTS (noble) only.**
 
-- Ubuntu 20.04 Server (LTS)
+The `common` role asserts this and fails immediately on anything else. Ubuntu 24.04
+ships PHP 8.3 and MariaDB 10.11, which satisfy the requirements of current Drupal
+releases. Earlier Ubuntu releases are no longer supported — support for 18.04/20.04
+was removed along with the workarounds those releases needed.
 
-Ubuntu 20.04 contains a modern version of PHP by default (PHP 7.4.x). Drupal 9 and on requires at least PHP 7.3. Therefore I have not attempted to support backwards compatibility of Ubuntu versions as I have in previous versions. I hope to have more time to expand compatibility to CentOS 8 in the future. 
+
+### Requirements
+
+On the **control machine**:
+
+- Ansible (`brew install ansible` on macOS, `sudo apt install ansible` on Ubuntu)
+- The collections in `requirements.yml`:
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
+
+On the **target server**:
+
+- Ubuntu 24.04 LTS with `python3` (present by default on Ubuntu Server)
+- An SSH account with `sudo` access
+
+
+### Setup
+
+1. Clone this project and change into it:
+
+```bash
+git clone https://github.com/johnmcgovern/ansible-drupal-role.git && cd ansible-drupal-role
+```
+
+2. Copy the sample inventory and variables:
+
+```bash
+cp hosts.sample hosts && cp group_vars/all.sample group_vars/all
+```
+
+3. Edit `hosts` to point at your server, and `group_vars/all` for your environment.
+   Both files are gitignored.
+
+
+### Secrets
+
+`group_vars/all` contains at minimum `db_user_password` and `drupal_admin_password`.
+Keep them out of plaintext by putting them in an encrypted file:
+
+```bash
+ansible-vault create group_vars/vault.yml
+```
+
+Put the secrets in `group_vars/vault.yml`, reference them from `group_vars/all`
+(`db_user_password: "{{ vault_db_user_password }}"`), and run with `--ask-vault-pass`.
+The playbook asserts both passwords are set and non-empty before it changes anything,
+and the tasks that consume them use `no_log`.
+
+There is no `db_root_password`. MariaDB's root account on Ubuntu authenticates through
+the `unix_socket` plugin, so administrative tasks connect over the local socket as
+system root. That is stronger than storing a root password in a vars file, and it means
+one less secret to manage.
+
+
+### Usage
+
+```bash
+ansible-playbook -i hosts site.yml
+```
+
+Limit to a subset of hosts:
+
+```bash
+ansible-playbook -i hosts --limit=host1 site.yml
+```
+
+The playbook is idempotent — a second run against a converged host reports zero
+changes. Re-running is safe on a live site: Drupal is only installed when
+`drush status` reports it is not already bootstrapped, and the hash salt is generated
+once and never rewritten.
+
+
+### Testing
+
+After a deploy, run the smoke test:
+
+```bash
+ansible-playbook -i hosts tests/verify.yml
+```
+
+It asserts the web server, PHP-FPM and MariaDB are running, that the FPM socket exists
+at the path the vhost points at, that the front page returns a rendered Drupal page
+rather than a PHP error, that Drupal bootstraps, that the hash salt is non-empty, that
+`settings.php` is not writable by the web server, and that the config sync directory is
+where Drupal actually looks for it. It also reports any error-severity items on the
+Drupal status report.
+
+Lint before committing:
+
+```bash
+ansible-lint && yamllint .
+```
 
 
 ### Notes
 
-- The goal of this role is to perform an installation of base Drupal (latest version) with all dependancies (Nginx/Apache, PHP, MariaDB, permissions, etc.) with no status page errors / issues.
-- trusted_host_patterns is not enabled by default but can be easily in group_vars/all. The reason for this is that if it is enabled, but not configured exactly correctly, the site will not be displayed.
+- `webserver_type` selects `nginx` (default) or `apache`.
+- The bare `php` metapackage is deliberately not installed. It depends on `php8.3`,
+  whose first dependency alternative is `libapache2-mod-php8.3`, so apt pulls in
+  apache2 as a side effect — which then binds port 80 and prevents nginx from starting.
+  `php-cli` provides the same interpreter with no web server attached.
+- `drupal_trusted_host_patterns` is an empty list by default, which disables Drupal's
+  host header protection and leaves one warning on the status report. Set it to a list
+  of regular expressions once your hostname is settled. An incorrect pattern makes the
+  site unreachable, which is why it is opt-in.
+- The Drupal code is owned by `root` and readable by the web server group. Only
+  `web/sites/default/files` and `config/sync` are writable by the web server, so a PHP
+  vulnerability cannot rewrite the application code.
+- The Composer installer is checksum-verified against the signature Composer publishes
+  before it is executed.
+- The hash salt lives in `{{ drupal_base_path }}/.hash_salt`, outside the docroot, and
+  `settings.php` reads it at runtime.
+
 
 ### ToDo
 
-- Enable php.ini best-practices and tunning for group_vars/all
-- Fix the ability to seperate Web and DB server (currently broken)
+- Enable php.ini best-practices and tuning from `group_vars/all`
+- TLS / certbot support
+- Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
+  variable and no longer hardcoded to localhost) but has not been tested end to end.
+  The DB user is still granted from `localhost` only.
 
 
 ### Contact
 
 - john@johnmcgovern.com
 - https://www.johnmcgovern.com
-

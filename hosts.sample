@@ -1,6 +1,18 @@
+---
+# Copy to hosts and edit.
+#
+# Web and DB can be the same machine (list the host in both groups) or split
+# across two machines. If you split them, set db_host in group_vars/all to the
+# database server's address and grant the Drupal DB user access from the web
+# server's address rather than localhost.
 
-[webservers]
-host1 ansible_host=192.168.1.1
-
-[dbservers]
-host1 ansible_host=192.168.1.1
+all:
+  children:
+    webservers:
+      hosts:
+        host1:
+          ansible_host: 192.168.1.1
+    dbservers:
+      hosts:
+        host1:
+          ansible_host: 192.168.1.1

@@ -1,5 +1,43 @@
 ---
 
-- name: restart apache2
-  service: name=apache2 state=restarted
-  
+- name: Restart apache2
+  ansible.builtin.service:
+    name: apache2
+    state: restarted
+
+- name: Restart nginx
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+
+# These two run in the order defined, and only when a Composer or Drush task
+# actually wrote to the tree. Doing the recursive chown unconditionally on every
+# play made the run permanently non-idempotent: it reset the writable
+# directories to root, and the fixup below flipped them back, every single time.
+- name: Reset Drupal file ownership
+  ansible.builtin.file:
+    path: "{{ drupal_base_path }}"
+    state: directory
+    owner: root
+    group: "{{ webserver_group }}"
+    recurse: true
+
+- name: Restore Drupal writable directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ webserver_user }}"
+    group: "{{ webserver_group }}"
+    recurse: true
+  loop:
+    - "{{ drupal_base_path }}/web/sites/default/files"
+    - "{{ drupal_config_sync_path }}"
+
+# Cron is a maintenance action, not converged state, so running it every play
+# would make the run report changes forever. It only needs to run when the site
+# was just installed or a module was just enabled.
+- name: Run Drupal cron
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} cron"
+    chdir: "{{ drupal_base_path }}"
+  changed_when: true

@@ -1,41 +1,55 @@
 ---
 
-- name: Set ./drupal directory user and group ownership
-  file:
-    path: "{{ drupal_base_path }}"
-    state: directory
-    owner: "{{ apache_user }}"    
-    group: "{{ apache_group }}"
-    recurse: yes
+# The salt is generated once and never regenerated. Previously the salt lived
+# inline in settings.php as an empty string for drush to fill in; on a second
+# playbook run the template rewrote it back to empty while the install marker
+# suppressed the reinstall, leaving a live site with no hash salt.
+- name: Generate the Drupal hash salt if it does not exist
+  ansible.builtin.shell:
+    cmd: set -o pipefail && openssl rand -base64 64 | tr -d '\n' > {{ drupal_hash_salt_file }}
+    executable: /bin/bash
+    creates: "{{ drupal_hash_salt_file }}"
 
-- name: Create ../config/sync
-  file:
-    path: "{{ drupal_base_path }}/web/config/sync/"
+- name: Lock down the hash salt file
+  ansible.builtin.file:
+    path: "{{ drupal_hash_salt_file }}"
+    state: file
+    owner: root
+    group: "{{ webserver_group }}"
+    mode: "0440"
+
+# Drupal resolves this path relative to the docroot, so '../config/sync' means
+# {{ drupal_base_path }}/config/sync. The previous version created it under
+# web/config/sync, which Drupal never looked at.
+- name: Create the config sync directory
+  ansible.builtin.file:
+    path: "{{ drupal_config_sync_path }}"
     state: directory
-    owner: "{{ apache_user }}"    
-    group: "{{ apache_group }}"
+    owner: "{{ webserver_user }}"
+    group: "{{ webserver_group }}"
+    mode: "0750"
 
 - name: Write Drupal settings.php
-  template: 
-    src: settings.php.j2 
+  ansible.builtin.template:
+    src: settings.php.j2
     dest: "{{ drupal_base_path }}/web/sites/default/settings.php"
-    owner: "{{ apache_user }}"        
-    group: "{{ apache_group }}"
-    mode: 0440 
+    owner: root
+    group: "{{ webserver_group }}"
+    mode: "0440"
+  no_log: true
 
 - name: Lock down sites/default
-  file:
+  ansible.builtin.file:
     path: "{{ drupal_base_path }}/web/sites/default"
     state: directory
-    owner: "{{ apache_user }}"        
-    group: "{{ apache_group }}"
-    mode: 0550   
-    recurse: yes
+    owner: root
+    group: "{{ webserver_group }}"
+    mode: "0550"
 
-- name: Create writeable /files dir
-  file:
+- name: Create the writable files directory
+  ansible.builtin.file:
     path: "{{ drupal_base_path }}/web/sites/default/files"
     state: directory
-    owner: "{{ apache_user }}"        
-    group: "{{ apache_group }}"
-    mode: 0770
+    owner: "{{ webserver_user }}"
+    group: "{{ webserver_group }}"
+    mode: "0770"

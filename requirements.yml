@@ -1,0 +1,9 @@
+---
+# Install with: ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: ansible.posix
+    version: ">=2.0.0"
+  - name: ansible.mysql
+    version: ">=5.0.0"
+  - name: community.general
+    version: ">=10.0.0"

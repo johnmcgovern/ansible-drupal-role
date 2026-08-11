@@ -1,48 +1,48 @@
 ---
 
-- name: Add bionic universe repository for Ubuntu Bionic (required for PHP modules)
-  apt_repository: 
-    repo: deb http://archive.ubuntu.com/ubuntu bionic universe
+- name: Assert the target is a supported OS
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_release == 'noble'
+    fail_msg: >-
+      This role supports Ubuntu 24.04 LTS (noble) only. Detected
+      {{ ansible_distribution }} {{ ansible_distribution_version }}
+      ({{ ansible_distribution_release }}).
+    success_msg: "Ubuntu 24.04 LTS (noble) detected."
+
+- name: Update apt package index
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
     state: present
-  when: ansible_distribution_release == 'bionic'
 
-- name: Add bionic-security universe repository for Ubuntu Bionic 
-  apt_repository: 
-    repo: deb http://archive.ubuntu.com/ubuntu bionic-security universe (required for PHP modules)
+# The nginx/apache2 packages create www-data themselves. We only assert it is
+# present rather than creating it, because rewriting an existing system user's
+# home directory or shell is invasive and is not needed by anything here.
+- name: Look up the web server account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ webserver_user }}"
+  register: webserver_account
+  failed_when: false
+
+- name: Create the web server group when it does not already exist
+  ansible.builtin.group:
+    name: "{{ webserver_group }}"
+    system: true
     state: present
-  when: ansible_distribution_release == 'bionic'  
 
-- name: Add bionic-updates universe repository for Ubuntu Bionic (required for PHP modules)
-  apt_repository: 
-    repo: deb http://archive.ubuntu.com/ubuntu bionic-updates universe
+- name: Create the web server user when it does not already exist
+  ansible.builtin.user:
+    name: "{{ webserver_user }}"
+    group: "{{ webserver_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
     state: present
-  when: ansible_distribution_release == 'bionic'  
-
-- name: Update apt package repos (apt-get update)
-  apt:
-    update_cache: yes
-
-- name: Install python modules and git
-  apt:
-    pkg:
-    - python3
-    - python3-pip
-    - python3-dev
-    - git
-    - unzip
-    - net-tools
-
-- name: Add "{{ apache_group }}" group
-  group:
-    name: "{{ apache_group }}"
-    state: present  
-  become: yes  
-
-- name: Add "{{ apache_user }}" user with the home dir /home/{{ os_user }}/ (so we can set ulimits)
-  user:
-    name: "{{ apache_user }}"
-    group: "{{ apache_group }}"
-    home: /home/{{ apache_user }}/
-    shell: /bin/bash
-    comment: WWW Data User
-  become: yes
+  when: webserver_account.ansible_facts.getent_passwd is not defined

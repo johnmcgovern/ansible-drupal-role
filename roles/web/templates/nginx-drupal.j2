@@ -1,6 +1,15 @@
+# {{ ansible_managed }}
 server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
     server_name {{ webserver_sitename }};
     root {{ drupal_base_path }}/web; ## <-- Your only path reference.
+
+    client_max_body_size {{ webserver_max_body_size }};
+
+    # Do not advertise the exact nginx version in responses or error pages.
+    server_tokens off;
 
     location = /favicon.ico {
         log_not_found off;
@@ -96,11 +105,13 @@ server {
         fastcgi_param QUERY_STRING $query_string;
         fastcgi_intercept_errors on;
 
-        # PHP 5 socket location.
-        #fastcgi_pass unix:/var/run/php5-fpm.sock;
+        fastcgi_read_timeout 300;
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
 
-        # PHP 7 socket location.
-        fastcgi_pass unix:/var/run/php/php-fpm.sock;
+        # Socket path is derived from the PHP version actually installed on the
+        # target, not hardcoded -- see roles/web/tasks/01_webserver_php_install.yml.
+        fastcgi_pass unix:{{ php_fpm_socket }};
     }
 
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {

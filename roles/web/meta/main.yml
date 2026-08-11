@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: web
+  author: John McGovern
+  description: Installs and configures nginx or apache2 with PHP for serving Drupal.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - drupal
+    - nginx
+    - apache
+    - php
+
+dependencies: []

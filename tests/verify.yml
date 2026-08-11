@@ -1,0 +1,133 @@
+---
+# Post-deploy smoke test. Read-only: asserts the deployed stack is actually
+# serving Drupal rather than merely having had the tasks reported as changed.
+#
+#   ansible-playbook -i hosts tests/verify.yml
+
+- name: Verify the deployed Drupal stack
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  vars:
+    drupal_base_path: /var/www/drupal
+    drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
+    webserver_type: nginx
+    webserver_user: www-data
+
+  tasks:
+
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert the web server is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[webserver_service].state == 'running'
+        fail_msg: "{{ webserver_service }} is not running."
+      vars:
+        webserver_service: "{{ 'nginx.service' if webserver_type == 'nginx' else 'apache2.service' }}"
+
+    - name: Assert MariaDB is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['mariadb.service'].state == 'running'
+        fail_msg: "mariadb is not running."
+
+    - name: Detect the PHP-FPM service
+      ansible.builtin.command:
+        cmd: php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
+      register: verify_php_version
+      changed_when: false
+
+    - name: Assert PHP-FPM is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[fpm_service].state == 'running'
+        fail_msg: "{{ fpm_service }} is not running."
+      vars:
+        fpm_service: "php{{ verify_php_version.stdout | trim }}-fpm.service"
+      when: webserver_type == 'nginx'
+
+    - name: Assert the PHP-FPM socket exists
+      ansible.builtin.stat:
+        path: "/run/php/php{{ verify_php_version.stdout | trim }}-fpm.sock"
+      register: verify_socket
+      failed_when: not verify_socket.stat.exists
+      when: webserver_type == 'nginx'
+
+    - name: Request the site front page over HTTP
+      ansible.builtin.uri:
+        url: "http://127.0.0.1/"
+        status_code: 200
+        return_content: true
+      register: verify_frontpage
+
+    - name: Assert the response is a rendered Drupal page and not a PHP error
+      ansible.builtin.assert:
+        that:
+          - "'Drupal' in verify_frontpage.content"
+          - "'Fatal error' not in verify_frontpage.content"
+          - "'The website encountered an unexpected error' not in verify_frontpage.content"
+        fail_msg: "Front page returned 200 but does not look like a working Drupal render."
+
+    - name: Assert Drupal bootstraps successfully
+      ansible.builtin.command:
+        cmd: "{{ drupal_drush }} status --field=bootstrap"
+        chdir: "{{ drupal_base_path }}"
+      register: verify_bootstrap
+      changed_when: false
+      failed_when: "'Successful' not in verify_bootstrap.stdout"
+
+    - name: Read the Drupal status report
+      ansible.builtin.command:
+        cmd: "{{ drupal_drush }} core:requirements --format=json --severity=2"
+        chdir: "{{ drupal_base_path }}"
+      register: verify_requirements
+      changed_when: false
+      failed_when: false
+
+    - name: Report any Drupal status page errors
+      ansible.builtin.debug:
+        msg: >-
+          {{ (verify_requirements.stdout | from_json).values() | map(attribute='title') | list
+             if verify_requirements.stdout | trim | length > 2
+             else 'No severity-2 (error) items on the Drupal status report.' }}
+
+    - name: Assert the hash salt is present and non-empty
+      ansible.builtin.command:
+        cmd: "{{ drupal_drush }} php:eval \"print strlen(\\Drupal\\Core\\Site\\Settings::get('hash_salt'));\""
+        chdir: "{{ drupal_base_path }}"
+      register: verify_salt
+      changed_when: false
+      failed_when: (verify_salt.stdout | trim | int) < 32
+
+    - name: Assert the files directory is writable by the web server
+      ansible.builtin.stat:
+        path: "{{ drupal_base_path }}/web/sites/default/files"
+      register: verify_files_dir
+      failed_when: >-
+        not verify_files_dir.stat.exists
+        or verify_files_dir.stat.pw_name != webserver_user
+
+    - name: Assert settings.php is not writable by the web server
+      ansible.builtin.stat:
+        path: "{{ drupal_base_path }}/web/sites/default/settings.php"
+      register: verify_settings
+      failed_when: >-
+        not verify_settings.stat.exists
+        or verify_settings.stat.wgrp
+        or verify_settings.stat.woth
+
+    - name: Assert the config sync directory is where Drupal expects it
+      ansible.builtin.command:
+        cmd: "{{ drupal_drush }} php:eval \"print \\Drupal\\Core\\Site\\Settings::get('config_sync_directory');\""
+        chdir: "{{ drupal_base_path }}"
+      register: verify_config_sync
+      changed_when: false
+
+    - name: Assert the config sync directory actually exists on disk
+      ansible.builtin.stat:
+        path: "{{ drupal_base_path }}/web/{{ verify_config_sync.stdout | trim }}"
+      register: verify_config_sync_dir
+      failed_when: not verify_config_sync_dir.stat.exists

@@ -1,17 +1,46 @@
 ---
 
-- name: Install Drupal modules with Composer (via command module due to issue with composer module)
-  command:
-     cmd: "composer require drupal/{{ item }} --no-interaction"
-     chdir: "{{ drupal_base_path }}"
-  become: false    
-  with_items: "{{ drupal_install_modules }}"  
+# Reading composer.json and skipping packages that are already required is both
+# idempotent and much faster than shelling out to `composer require` for every
+# module on every run and then trying to infer from its output whether anything
+# actually changed.
+- name: Read the Drupal composer manifest
+  ansible.builtin.slurp:
+    src: "{{ drupal_base_path }}/composer.json"
+  register: drupal_composer_manifest
+
+- name: Determine which packages are already required
+  ansible.builtin.set_fact:
+    drupal_required_packages: >-
+      {{ (drupal_composer_manifest.content | b64decode | from_json).require.keys() | list }}
+
+# These run as root, matching the rest of the Composer work. The previous
+# version used `become: false`, which ran composer as the SSH user against a
+# tree owned by www-data.
+- name: Install Drupal modules with Composer
+  ansible.builtin.command:
+    cmd: "composer require drupal/{{ item }} --no-interaction"
+    chdir: "{{ drupal_base_path }}"
+  environment: "{{ drupal_composer_env }}"
+  loop: "{{ drupal_install_modules }}"
+  when: "'drupal/' + item not in drupal_required_packages"
+  changed_when: true
+  notify:
+    - Reset Drupal file ownership
+    - Restore Drupal writable directories
+
+- name: Query the currently enabled Drupal modules
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} pm:list --status=enabled --format=json"
+    chdir: "{{ drupal_base_path }}"
+  register: drupal_enabled_modules
+  changed_when: false
 
 - name: Enable Drupal modules with Drush
-  command: "{{ drupal_base_path }}/vendor/drush/drush/drush en {{ item }} --no-interaction"
-  become: false
-  with_items: "{{ drupal_enable_modules }}"
-
-- name: Run cron
-  become: false
-  command: "{{ drupal_base_path }}/vendor/drush/drush/drush cron"
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} pm:enable {{ item }} --yes"
+    chdir: "{{ drupal_base_path }}"
+  loop: "{{ drupal_enable_modules }}"
+  when: item not in (drupal_enabled_modules.stdout | from_json)
+  changed_when: true
+  notify: Run Drupal cron

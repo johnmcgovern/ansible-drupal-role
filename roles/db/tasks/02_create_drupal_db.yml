@@ -1,22 +1,29 @@
 ---
 
-- name: Create Drupal Database
-  mysql_db: 
-    name: "{{ db_name }}"
-    state: present
-    login_user: root
-    login_password: "{{ db_root_password }}"
-  become: true
-  become_user: root    
+- name: Assert the Drupal DB user password is set
+  ansible.builtin.assert:
+    that:
+      - db_user_password is defined
+      - db_user_password | length > 0
+    fail_msg: "db_user_password must be set (ideally in an ansible-vault encrypted file)."
 
-- name: Create Drupal DB User
-  mysql_user: 
-    name: "{{ db_user }}" 
-    password: "{{ db_user_password }}" 
-    priv: "{{ db_name }}.*:{{ db_user_perms }}" 
-    host: localhost 
-    state: present 
-    login_user: root
-    login_password: "{{ db_root_password }}"
-  become: true
-  become_user: root   
+# Drupal 10/11 expect utf8mb4 with a general collation; the server default on
+# 24.04 is utf8mb4_general_ci already, but pinning it here keeps the schema
+# consistent if the server default ever changes.
+- name: Create the Drupal database
+  ansible.mysql.mysql_db:
+    login_unix_socket: "{{ db_login_unix_socket }}"
+    name: "{{ db_name }}"
+    encoding: utf8mb4
+    collation: utf8mb4_general_ci
+    state: present
+
+- name: Create the Drupal database user
+  ansible.mysql.mysql_user:
+    login_unix_socket: "{{ db_login_unix_socket }}"
+    name: "{{ db_user }}"
+    password: "{{ db_user_password }}"
+    priv: "{{ db_name }}.*:{{ db_user_perms }}"
+    host: localhost
+    state: present
+  no_log: true

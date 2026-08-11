@@ -1,29 +1,39 @@
 ---
 
 - name: Install MariaDB server and client
-  apt: 
-    pkg:
-    - mariadb-server
-    - mariadb-client
-    - libmysqlclient-dev
-
-- name: Install PyMySQL
-  pip:
-    name: PyMySQL
-
-- name: Start MariaDB Service
-  service: name={{ db_service }} state=started enabled=yes
-
-- name: Set a password for the MariaDB root user
-  mysql_user:
-    # you can get socket path from /etc/mysql/mysql.conf.d/mysqld.cnf
-    login_unix_socket: /run/mysqld/mysqld.sock  # default path
-    name: root
-    password: "{{ db_root_password }}"
-    priv: '*.*:ALL,GRANT'
+  ansible.builtin.apt:
+    name:
+      - mariadb-server
+      - mariadb-client
     state: present
-    login_user: root
-    login_password: "{{ db_root_password }}"
-    check_implicit_admin: yes
-  become: yes
-  become_user: root
+
+# Ubuntu 24.04 marks the system Python as externally managed (PEP 668), so
+# `pip install PyMySQL` is refused. The distro package is the supported route.
+# PyMySQL is pure Python, so no -dev headers or compiler are needed either.
+- name: Install the Python MySQL client library
+  ansible.builtin.apt:
+    name: python3-pymysql
+    state: present
+
+- name: Ensure MariaDB is running and enabled
+  ansible.builtin.service:
+    name: "{{ db_service }}"
+    state: started
+    enabled: true
+
+# MariaDB on Ubuntu authenticates root through the unix_socket plugin: only a
+# process already running as system root can connect as DB root. That is
+# strictly stronger than a password in a vars file, so it is left in place and
+# every admin task below connects over the socket instead.
+- name: Remove the anonymous MariaDB accounts
+  ansible.mysql.mysql_user:
+    login_unix_socket: "{{ db_login_unix_socket }}"
+    name: ""
+    host_all: true
+    state: absent
+
+- name: Remove the MariaDB test database
+  ansible.mysql.mysql_db:
+    login_unix_socket: "{{ db_login_unix_socket }}"
+    name: test
+    state: absent

@@ -1,15 +1,26 @@
+# {{ ansible_managed }}
 <VirtualHost *:80>
 
-	ServerName {{ webserver_sitename}}
+	ServerName {{ webserver_sitename }}
 
-	ServerAdmin {{ webserver_email}}
+	ServerAdmin {{ webserver_email }}
 	DocumentRoot {{ drupal_base_path }}/web
 
 	ErrorLog ${APACHE_LOG_DIR}/error.log
 	CustomLog ${APACHE_LOG_DIR}/access.log combined
 
+	<Directory {{ drupal_base_path }}/web>
+		Options FollowSymLinks
+		# Drupal ships a .htaccess that does the clean-URL rewriting and a
+		# large amount of hardening, so it needs to be honoured here.
+		AllowOverride All
+		Require all granted
+	</Directory>
+
+	# Never serve anything above the docroot, including vendor/ and the
+	# generated hash salt file.
 	<Directory {{ drupal_base_path }}>
- 		AllowOverride All
+		Require all denied
 	</Directory>
 
 </VirtualHost>

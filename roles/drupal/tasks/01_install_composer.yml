@@ -1,30 +1,43 @@
 ---
 
-- name: Download Composer installer
-  get_url:
+- name: Check whether Composer is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/composer
+  register: composer_binary
+
+- name: Download the Composer installer
+  ansible.builtin.get_url:
     url: https://getcomposer.org/installer
     dest: /tmp/composer-setup.php
-    mode: 0440
+    mode: "0640"
+  when: not composer_binary.stat.exists
 
-- name:  Run the Composer installer
-  command: creates="/usr/local/bin/composer" php /tmp/composer-setup.php --install-dir=/usr/local/bin/ --filename=composer 
+# Running an unverified remote PHP script as root is a supply-chain risk. The
+# installer ships its own --check mode that validates against the signature
+# Composer publishes, so use it rather than executing blind.
+- name: Fetch the published Composer installer signature
+  ansible.builtin.uri:
+    url: "{{ composer_installer_sig_url }}"
+    return_content: true
+  register: composer_installer_sig
+  when: not composer_binary.stat.exists
 
-- name: Create writeable ~/.composer
-  become: false
-  file:
-    path: ~/.composer
-    state: directory
-    owner: "{{ apache_user }}"
-    group: "{{ apache_group }}"
-    mode: 0770
-    recurse: yes
+- name: Verify the Composer installer checksum
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      test "$(php -r "echo hash_file('sha384', '/tmp/composer-setup.php');")"
+      = "{{ composer_installer_sig.content | trim }}"
+    executable: /bin/bash
+  changed_when: false
+  when: not composer_binary.stat.exists
 
-- name: Create writeable ~/.drush
-  become: false
-  file:
-    path: ~/.drush
-    state: directory
-    owner: "{{ apache_user }}"
-    group: "{{ apache_group }}"
-    mode: 0770
-    recurse: yes    
+- name: Run the Composer installer
+  ansible.builtin.command:
+    cmd: php /tmp/composer-setup.php --install-dir=/usr/local/bin/ --filename=composer
+    creates: /usr/local/bin/composer
+
+- name: Remove the Composer installer
+  ansible.builtin.file:
+    path: /tmp/composer-setup.php
+    state: absent
