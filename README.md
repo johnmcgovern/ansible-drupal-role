@@ -110,6 +110,10 @@ webserver_tls_challenge: dns-01
 webserver_tls_cloudflare_token: "{{ vault_cloudflare_token }}"
 ```
 
+The vhost emits `http2 on;` or the older `listen ... ssl http2` form depending on the
+installed nginx version — the standalone directive only exists from nginx 1.25.1, and
+Ubuntu 24.04 ships 1.24.
+
 Set `webserver_tls_staging: true` while testing. It issues an untrusted certificate
 from the Let's Encrypt staging CA, which has far looser rate limits than production
 (production allows only 5 duplicate certificates per week).

@@ -1,9 +1,25 @@
 ---
 
-# First pass: HTTP only. The TLS block is enabled later by 03_tls.yml, once a
-# certificate actually exists on disk -- referencing a missing certificate file
-# makes nginx refuse to start.
-- name: Write the web server vhost (HTTP)
+# Decide up front whether this host already has a certificate. Without this the
+# first pass would write an HTTP-only vhost on every run and 04_tls.yml would
+# immediately rewrite it with TLS again -- two changes and two restarts on a
+# host that is already converged.
+- name: Check for an existing TLS certificate
+  ansible.builtin.stat:
+    path: "{{ webserver_tls_cert_dir }}/fullchain.pem"
+  register: webserver_tls_existing_cert
+  when: webserver_tls_enabled
+
+- name: Enable the TLS vhost when a certificate already exists
+  ansible.builtin.set_fact:
+    webserver_tls_active: >-
+      {{ webserver_tls_enabled | bool
+         and (webserver_tls_existing_cert.stat.exists | default(false)) }}
+
+# On a first run this writes an HTTP-only vhost, because nginx refuses to start
+# when ssl_certificate points at a file that does not exist yet. 04_tls.yml
+# rewrites it once certbot has issued the certificate.
+- name: Write the web server vhost
   ansible.builtin.include_tasks: _write_vhost.yml
 
 - name: Create the ACME challenge webroot

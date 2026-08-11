@@ -34,8 +34,10 @@
     owner: root
     group: root
     mode: "0600"
+    # ansible_managed is supplied by the template action plugin and is not a
+    # global variable, so it cannot be referenced from copy's content.
     content: |
-      # {{ ansible_managed }}
+      # Managed by Ansible. Local edits will be overwritten.
       dns_cloudflare_api_token = {{ webserver_tls_cloudflare_token }}
   when: webserver_tls_challenge == 'dns-01'
   no_log: true
@@ -94,7 +96,7 @@
     mode: "0755"
     content: |
       #!/bin/sh
-      # {{ ansible_managed }}
+      # Managed by Ansible. Local edits will be overwritten.
       systemctl reload {{ 'nginx' if webserver_type == 'nginx' else 'apache2' }}
   when: webserver_tls_active
 

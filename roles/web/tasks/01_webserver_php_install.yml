@@ -59,6 +59,21 @@
   when: webserver_type == 'apache'
   notify: Restart apache2
 
+# nginx 1.25.1 replaced the `http2` parameter of the listen directive with a
+# standalone `http2 on;`. Noble ships 1.24, so the vhost has to emit whichever
+# form the installed build understands.
+- name: Determine the installed Nginx version
+  ansible.builtin.command:
+    cmd: nginx -v
+  register: nginx_version_result
+  changed_when: false
+  when: webserver_type == 'nginx'
+
+- name: Register the Nginx version
+  ansible.builtin.set_fact:
+    webserver_nginx_version: "{{ nginx_version_result.stderr | regex_search('nginx/([0-9.]+)', '\\1') | first }}"
+  when: webserver_type == 'nginx'
+
 - name: Ensure PHP-FPM is running and enabled
   ansible.builtin.service:
     name: "{{ php_fpm_service }}"

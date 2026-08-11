@@ -9,15 +9,27 @@
   become: true
   gather_facts: true
 
+  # These are deliberately NOT named after the role variables. Play vars take
+  # precedence over group_vars, so reusing the real names here would shadow the
+  # deployed configuration and, for example, silently skip every TLS check on a
+  # TLS-enabled host.
   vars:
-    drupal_base_path: /var/www/drupal
-    drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
-    webserver_type: nginx
-    webserver_user: www-data
-    webserver_tls_enabled: false
-    webserver_sitename: localhost
-    webserver_max_body_size: 64M
-    php_memory_limit: 256M
+    verify_base_path: "{{ drupal_base_path | default('/var/www/drupal') }}"
+    verify_drush: "{{ verify_base_path }}/vendor/bin/drush"
+    verify_webserver_type: "{{ webserver_type | default('nginx') }}"
+    verify_webserver_user: "{{ webserver_user | default('www-data') }}"
+    verify_sitename: "{{ webserver_sitename | default('127.0.0.1') }}"
+    verify_max_body_size: "{{ webserver_max_body_size | default('64M') }}"
+    verify_memory_limit: "{{ php_memory_limit | default('256M') }}"
+    verify_tls_enabled: "{{ webserver_tls_enabled | default(false) | bool }}"
+    verify_tls_staging: "{{ webserver_tls_staging | default(false) | bool }}"
+    # A staging certificate is signed by an untrusted CA by design, so chain
+    # validation has to be off for those runs. Everything else is still checked.
+    verify_validate_certs: "{{ not (webserver_tls_staging | default(false) | bool) }}"
+    verify_site_url: >-
+      {{ 'https://' ~ (webserver_sitename | default('127.0.0.1'))
+         if (webserver_tls_enabled | default(false) | bool)
+         else 'http://127.0.0.1' }}
 
   tasks:
 
@@ -30,7 +42,7 @@
           - ansible_facts.services[webserver_service].state == 'running'
         fail_msg: "{{ webserver_service }} is not running."
       vars:
-        webserver_service: "{{ 'nginx.service' if webserver_type == 'nginx' else 'apache2.service' }}"
+        webserver_service: "{{ 'nginx.service' if verify_webserver_type == 'nginx' else 'apache2.service' }}"
 
     - name: Assert MariaDB is running
       ansible.builtin.assert:
@@ -51,20 +63,21 @@
         fail_msg: "{{ fpm_service }} is not running."
       vars:
         fpm_service: "php{{ verify_php_version.stdout | trim }}-fpm.service"
-      when: webserver_type == 'nginx'
+      when: verify_webserver_type == 'nginx'
 
     - name: Assert the PHP-FPM socket exists
       ansible.builtin.stat:
         path: "/run/php/php{{ verify_php_version.stdout | trim }}-fpm.sock"
       register: verify_socket
       failed_when: not verify_socket.stat.exists
-      when: webserver_type == 'nginx'
+      when: verify_webserver_type == 'nginx'
 
-    - name: Request the site front page over HTTP
+    - name: Request the site front page
       ansible.builtin.uri:
-        url: "http://127.0.0.1/"
+        url: "{{ verify_site_url }}/"
         status_code: 200
         return_content: true
+        validate_certs: "{{ verify_validate_certs }}"
       register: verify_frontpage
 
     - name: Assert the response is a rendered Drupal page and not a PHP error
@@ -77,16 +90,16 @@
 
     - name: Assert Drupal bootstraps successfully
       ansible.builtin.command:
-        cmd: "{{ drupal_drush }} status --field=bootstrap"
-        chdir: "{{ drupal_base_path }}"
+        cmd: "{{ verify_drush }} status --field=bootstrap"
+        chdir: "{{ verify_base_path }}"
       register: verify_bootstrap
       changed_when: false
       failed_when: "'Successful' not in verify_bootstrap.stdout"
 
     - name: Read the Drupal status report
       ansible.builtin.command:
-        cmd: "{{ drupal_drush }} core:requirements --format=json --severity=2"
-        chdir: "{{ drupal_base_path }}"
+        cmd: "{{ verify_drush }} core:requirements --format=json --severity=2"
+        chdir: "{{ verify_base_path }}"
       register: verify_requirements
       changed_when: false
       failed_when: false
@@ -100,23 +113,23 @@
 
     - name: Assert the hash salt is present and non-empty
       ansible.builtin.command:
-        cmd: "{{ drupal_drush }} php:eval \"print strlen(\\Drupal\\Core\\Site\\Settings::get('hash_salt'));\""
-        chdir: "{{ drupal_base_path }}"
+        cmd: "{{ verify_drush }} php:eval \"print strlen(\\Drupal\\Core\\Site\\Settings::get('hash_salt'));\""
+        chdir: "{{ verify_base_path }}"
       register: verify_salt
       changed_when: false
       failed_when: (verify_salt.stdout | trim | int) < 32
 
     - name: Assert the files directory is writable by the web server
       ansible.builtin.stat:
-        path: "{{ drupal_base_path }}/web/sites/default/files"
+        path: "{{ verify_base_path }}/web/sites/default/files"
       register: verify_files_dir
       failed_when: >-
         not verify_files_dir.stat.exists
-        or verify_files_dir.stat.pw_name != webserver_user
+        or verify_files_dir.stat.pw_name != verify_webserver_user
 
     - name: Assert settings.php is not writable by the web server
       ansible.builtin.stat:
-        path: "{{ drupal_base_path }}/web/sites/default/settings.php"
+        path: "{{ verify_base_path }}/web/sites/default/settings.php"
       register: verify_settings
       failed_when: >-
         not verify_settings.stat.exists
@@ -125,14 +138,14 @@
 
     - name: Assert the config sync directory is where Drupal expects it
       ansible.builtin.command:
-        cmd: "{{ drupal_drush }} php:eval \"print \\Drupal\\Core\\Site\\Settings::get('config_sync_directory');\""
-        chdir: "{{ drupal_base_path }}"
+        cmd: "{{ verify_drush }} php:eval \"print \\Drupal\\Core\\Site\\Settings::get('config_sync_directory');\""
+        chdir: "{{ verify_base_path }}"
       register: verify_config_sync
       changed_when: false
 
     - name: Assert the config sync directory actually exists on disk
       ansible.builtin.stat:
-        path: "{{ drupal_base_path }}/web/{{ verify_config_sync.stdout | trim }}"
+        path: "{{ verify_base_path }}/web/{{ verify_config_sync.stdout | trim }}"
       register: verify_config_sync_dir
       failed_when: not verify_config_sync_dir.stat.exists
 
@@ -150,6 +163,7 @@
         cmd: "php-fpm{{ verify_php_version.stdout | trim }} -i"
       register: verify_php_ini
       changed_when: false
+      when: verify_webserver_type == 'nginx'
 
     # php -i prints "key => local_value => master_value". Lines that do not
     # match that shape (section headers, multi-line values) yield None from
@@ -161,11 +175,12 @@
                   | map('regex_search', '^([a-z_][a-z0-9_.]*) => (.*?) => (.*)$', '\1', '\2')
                   | select('ne', None)
                   | list) }}
+      when: verify_webserver_type == 'nginx'
 
     - name: Assert the PHP tuning is in effect for the FPM SAPI
       ansible.builtin.assert:
         that:
-          - verify_php['memory_limit'] == php_memory_limit
+          - verify_php['memory_limit'] == verify_memory_limit
           - verify_php['max_input_vars'] | int >= 2000
           - verify_php['max_execution_time'] | int > 0
           - verify_php['opcache.enable'] == 'On'
@@ -175,21 +190,24 @@
           memory_limit={{ verify_php['memory_limit'] | default('?') }}
           max_execution_time={{ verify_php['max_execution_time'] | default('?') }}
           opcache={{ verify_php['opcache.enable'] | default('?') }}
+      when: verify_webserver_type == 'nginx'
 
     - name: Assert APCu is available to the FPM SAPI
       ansible.builtin.assert:
         that:
           - "'apcu' in verify_php_ini.stdout"
         fail_msg: "APCu is not loaded in PHP-FPM; Drupal's status report will flag the cache backend."
+      when: verify_webserver_type == 'nginx'
 
     - name: Assert the PHP and web server upload limits agree
       ansible.builtin.assert:
         that:
-          - verify_php['upload_max_filesize'] | upper == webserver_max_body_size | upper
+          - verify_php['upload_max_filesize'] | upper == verify_max_body_size | upper
         fail_msg: >-
           upload_max_filesize ({{ verify_php['upload_max_filesize'] }}) does not
-          match the web server body limit ({{ webserver_max_body_size }}), which
+          match the web server body limit ({{ verify_max_body_size }}), which
           produces confusing 413s at the boundary.
+      when: verify_webserver_type == 'nginx'
 
 
     #
@@ -198,48 +216,90 @@
 
     - name: Assert HTTP redirects to HTTPS
       ansible.builtin.uri:
-        url: "http://{{ webserver_sitename }}/"
+        url: "http://{{ verify_sitename }}/"
         follow_redirects: none
         status_code: 301
       register: verify_redirect
       failed_when: >-
         verify_redirect.location is not defined
         or not verify_redirect.location.startswith('https://')
-      when: webserver_tls_enabled
+      when: verify_tls_enabled
 
-    - name: Assert the site serves over HTTPS with a valid certificate
+    - name: Assert the ACME challenge path is still reachable over HTTP
       ansible.builtin.uri:
-        url: "https://{{ webserver_sitename }}/"
-        status_code: 200
-        return_content: true
-        validate_certs: "{{ not webserver_tls_staging | default(false) }}"
-      register: verify_https
-      when: webserver_tls_enabled
+        url: "http://{{ verify_sitename }}/.well-known/acme-challenge/verify-probe"
+        status_code: [404, 403]
+        follow_redirects: none
+      when: verify_tls_enabled
 
-    # The uri module exposes response headers as lowercased top-level keys with
-    # dashes turned into underscores.
     - name: Assert HSTS is set and Drupal knows the request was over TLS
       ansible.builtin.assert:
         that:
-          - verify_https.strict_transport_security is defined
-          - "'Drupal' in verify_https.content"
-          - "'http://' ~ webserver_sitename not in verify_https.content"
+          - verify_frontpage.strict_transport_security is defined
+          - "'http://' ~ verify_sitename not in verify_frontpage.content"
         fail_msg: >-
           HTTPS responded but either HSTS is missing or Drupal is still
           generating http:// URLs (check fastcgi_param HTTPS on).
-      when: webserver_tls_enabled
+      when: verify_tls_enabled
 
+    - name: Assert the negotiated protocol is TLS 1.2 or better
+      ansible.builtin.command:
+        cmd: >-
+          openssl s_client -connect 127.0.0.1:443
+          -servername {{ verify_sitename }} -tls1_2 -brief
+      register: verify_tls_proto
+      changed_when: false
+      failed_when: verify_tls_proto.rc != 0
+      when: verify_tls_enabled
+
+    - name: Assert TLS 1.0 and 1.1 are refused
+      ansible.builtin.command:
+        cmd: >-
+          openssl s_client -connect 127.0.0.1:443
+          -servername {{ verify_sitename }} -tls1_1 -brief
+      register: verify_tls_old
+      changed_when: false
+      failed_when: verify_tls_old.rc == 0
+      when: verify_tls_enabled
+
+    # service_facts only enumerates .service units, so the timer has to be
+    # queried directly. Calling systemd_service with neither state nor enabled
+    # only reads status; it does not change anything.
     - name: Assert the certbot renewal timer is active
-      ansible.builtin.assert:
-        that:
-          - ansible_facts.services['certbot.timer'].state == 'running'
-        fail_msg: "certbot.timer is not active; certificates will not auto-renew."
-      when: webserver_tls_enabled
+      ansible.builtin.systemd_service:
+        name: certbot.timer
+      register: verify_certbot_timer
+      changed_when: false
+      failed_when: verify_certbot_timer.status.ActiveState != 'active'
+      when: verify_tls_enabled
+
+    - name: Assert the renewal deploy hook is installed and executable
+      ansible.builtin.stat:
+        path: /etc/letsencrypt/renewal-hooks/deploy/reload-webserver.sh
+      register: verify_deploy_hook
+      failed_when: >-
+        not verify_deploy_hook.stat.exists
+        or not verify_deploy_hook.stat.xusr
+      when: verify_tls_enabled
+
+    - name: Assert a certbot dry-run renewal succeeds
+      ansible.builtin.command:
+        cmd: certbot renew --dry-run --cert-name {{ verify_sitename }}
+      register: verify_renew
+      changed_when: false
+      when: verify_tls_enabled
 
     - name: Check the certificate is not close to expiry
       ansible.builtin.command:
-        cmd: "openssl x509 -in /etc/letsencrypt/live/{{ webserver_sitename }}/fullchain.pem -noout -checkend 1209600"
+        cmd: "openssl x509 -in /etc/letsencrypt/live/{{ verify_sitename }}/fullchain.pem -noout -checkend 1209600"
       register: verify_cert_expiry
       changed_when: false
       failed_when: verify_cert_expiry.rc != 0
-      when: webserver_tls_enabled
+      when: verify_tls_enabled
+
+    - name: Assert the Cloudflare credentials file is not world or group readable
+      ansible.builtin.stat:
+        path: /etc/letsencrypt/cloudflare.ini
+      register: verify_cf_creds
+      failed_when: verify_cf_creds.stat.exists and (verify_cf_creds.stat.rgrp or verify_cf_creds.stat.roth)
+      when: verify_tls_enabled
