@@ -202,13 +202,22 @@ by default are handled:
   `false` to match that future default so a major upgrade cannot silently change how
   forms validate. Set `drupal_enable_html5_validation: true` to keep browser-side
   validation on.
-- **AVIF / GD library** — *not fixable on Ubuntu 24.04.* Noble's `libgd3` is not built
-  against `libavif`, and PHP's gd extension bakes format support in at compile time.
-  Neither Ubuntu's `php8.3-gd` nor the ondrej PPA build contains a single AVIF symbol,
-  so switching to that PPA would add third-party-repo risk without fixing anything.
-  Clearing this would require building PHP's gd extension from source against a
-  libgd with AVIF. `tests/verify.yml` therefore allows exactly this one item, by name,
-  so that any *other* warning still fails the run.
+- **AVIF / GD library** — *not fixable on Ubuntu 24.04, by vendor policy.* Ubuntu
+  deliberately builds `libgd2` without libavif: `libgd2` is in main, libavif's Rust
+  dependency tree keeps it in universe, and main packages cannot build-depend on
+  universe ([LP#2031934](https://bugs.launchpad.net/ubuntu/+source/libgd2/+bug/2031934)
+  — the maintainer states no fix will be backported to stable releases). Debian's own
+  libgd has AVIF enabled; this is Ubuntu-specific. Neither Ubuntu's `php8.3-gd` nor
+  the ondrej PPA build contains AVIF support (verified by inspecting both binaries).
+  Rebuilding libgd + ext/gd locally works but means privately maintaining two
+  security-sensitive libraries that apt will silently revert on upgrade. If AVIF
+  image derivatives are actually needed, use `php-imagick` with the ImageMagick
+  toolkit contrib module (the path Drupal's own
+  [AVIF issue](https://www.drupal.org/project/drupal/issues/3202016) endorses), or
+  wait for a post-libavif-MIR Ubuntu release. Drupal's requirement is documented in
+  [the AVIF change record](https://www.drupal.org/node/3348348) (Drupal 11.2.0).
+  `tests/verify.yml` therefore allows exactly this one item, by name, so that any
+  *other* warning still fails the run.
 
 
 ### Notes
