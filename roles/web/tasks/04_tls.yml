@@ -1,0 +1,105 @@
+---
+
+- name: Assert the TLS settings are usable
+  ansible.builtin.assert:
+    that:
+      - webserver_tls_email | default('') | length > 0
+      - webserver_sitename not in ['localhost', '']
+      - webserver_tls_challenge in ['http-01', 'dns-01']
+    fail_msg: >-
+      TLS requires webserver_tls_email to be set, webserver_sitename to be a
+      real hostname, and webserver_tls_challenge to be http-01 or dns-01.
+
+# HTTP-01 needs the ACME servers to make an inbound request to port 80, so it
+# only works for a publicly reachable host. DNS-01 proves control by writing a
+# TXT record instead, which is the option for an internal or firewalled server.
+- name: Assert the Cloudflare API token is set for the dns-01 challenge
+  ansible.builtin.assert:
+    that:
+      - webserver_tls_cloudflare_token | default('') | length > 0
+    fail_msg: >-
+      webserver_tls_challenge is dns-01, which requires
+      webserver_tls_cloudflare_token (a Cloudflare API token with
+      Zone:DNS:Edit on the zone). Put it in an ansible-vault encrypted file.
+  when: webserver_tls_challenge == 'dns-01'
+
+- name: Install certbot
+  ansible.builtin.apt:
+    name: "{{ ['certbot'] + (['python3-certbot-dns-cloudflare'] if webserver_tls_challenge == 'dns-01' else []) }}"
+    state: present
+
+- name: Write the Cloudflare API credentials
+  ansible.builtin.copy:
+    dest: "{{ webserver_tls_cloudflare_credentials }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      # {{ ansible_managed }}
+      dns_cloudflare_api_token = {{ webserver_tls_cloudflare_token }}
+  when: webserver_tls_challenge == 'dns-01'
+  no_log: true
+
+# --webroot rather than the --nginx/--apache plugins on purpose: those rewrite
+# the vhost in place, which would fight the template that Ansible manages.
+# With --webroot certbot only ever writes challenge files and certificates.
+- name: Obtain the Let's Encrypt certificate
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly
+      {% if webserver_tls_challenge == 'dns-01' %}
+      --dns-cloudflare
+      --dns-cloudflare-credentials {{ webserver_tls_cloudflare_credentials }}
+      --dns-cloudflare-propagation-seconds {{ webserver_tls_dns_propagation_seconds }}
+      {% else %}
+      --webroot --webroot-path {{ webserver_acme_webroot }}
+      {% endif %}
+      --domain {{ webserver_sitename }}
+      --email {{ webserver_tls_email }}
+      --agree-tos --no-eff-email --non-interactive
+      {{ '--staging' if webserver_tls_staging else '' }}
+    creates: "{{ webserver_tls_cert_dir }}/fullchain.pem"
+
+- name: Check that the certificate is present
+  ansible.builtin.stat:
+    path: "{{ webserver_tls_cert_dir }}/fullchain.pem"
+  register: webserver_tls_cert
+
+- name: Enable the TLS vhost now that a certificate exists
+  ansible.builtin.set_fact:
+    webserver_tls_active: "{{ webserver_tls_cert.stat.exists }}"
+
+# Second pass over the same template, this time emitting the 443 block and the
+# port 80 -> 443 redirect.
+- name: Rewrite the web server vhost with TLS enabled
+  ansible.builtin.include_tasks: _write_vhost.yml
+  when: webserver_tls_active
+
+- name: Validate the Nginx configuration with TLS enabled
+  ansible.builtin.command:
+    cmd: nginx -t
+  changed_when: false
+  when:
+    - webserver_type == 'nginx'
+    - webserver_tls_active
+
+# The certbot package ships a systemd timer that renews automatically, but it
+# has no way to know the web server needs reloading to pick up the new
+# certificate. Deploy hooks run only when a certificate is actually renewed.
+- name: Install the certbot deploy hook to reload the web server
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-webserver.sh
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # {{ ansible_managed }}
+      systemctl reload {{ 'nginx' if webserver_type == 'nginx' else 'apache2' }}
+  when: webserver_tls_active
+
+- name: Ensure the certbot renewal timer is enabled
+  ansible.builtin.service:
+    name: certbot.timer
+    state: started
+    enabled: true

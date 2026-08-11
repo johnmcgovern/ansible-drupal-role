@@ -1,0 +1,48 @@
+; {{ ansible_managed }}
+;
+; Drop-in overrides loaded after the distribution php.ini. The packaged
+; php.ini is left untouched so package upgrades never conflict with this file.
+
+[PHP]
+memory_limit = {{ php_memory_limit }}
+max_execution_time = {{ php_max_execution_time }}
+max_input_time = {{ php_max_input_time }}
+
+; Drupal's admin forms (permissions, field UI) post a large number of inputs;
+; the stock 1000 silently truncates them.
+max_input_vars = {{ php_max_input_vars }}
+
+upload_max_filesize = {{ php_upload_max_filesize }}
+post_max_size = {{ php_post_max_size }}
+
+; Do not advertise the PHP version in response headers.
+expose_php = {{ php_expose_php }}
+
+[opcache]
+opcache.enable = {{ php_opcache_enable }}
+opcache.enable_cli = {{ php_opcache_enable_cli }}
+opcache.memory_consumption = {{ php_opcache_memory_consumption }}
+opcache.interned_strings_buffer = {{ php_opcache_interned_strings_buffer }}
+opcache.max_accelerated_files = {{ php_opcache_max_accelerated_files }}
+opcache.validate_timestamps = {{ php_opcache_validate_timestamps }}
+opcache.revalidate_freq = {{ php_opcache_revalidate_freq }}
+; Drupal's status report warns when this is below 5%.
+opcache.max_wasted_percentage = {{ php_opcache_max_wasted_percentage }}
+
+[apcu]
+apc.enabled = 1
+apc.shm_size = {{ php_apcu_shm_size }}
+apc.enable_cli = 0
+
+[realpath]
+; Drupal resolves a very large number of paths per request; the 4K default
+; means most of them miss the cache.
+realpath_cache_size = {{ php_realpath_cache_size }}
+realpath_cache_ttl = {{ php_realpath_cache_ttl }}
+
+[Session]
+session.cookie_httponly = 1
+session.cookie_samesite = "{{ php_session_cookie_samesite }}"
+{% if webserver_tls_enabled %}
+session.cookie_secure = 1
+{% endif %}

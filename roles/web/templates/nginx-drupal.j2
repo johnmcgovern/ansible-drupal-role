@@ -1,7 +1,66 @@
 # {{ ansible_managed }}
+{% if webserver_tls_active | default(false) %}
+# Port 80 exists only to answer ACME challenges and redirect everything else to
+# HTTPS. Drupal itself is served from the TLS block below.
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
+
+    server_name {{ webserver_sitename }};
+    server_tokens off;
+
+    # ^~ so this wins over the regex locations, including the hidden-file deny.
+    location ^~ /.well-known/acme-challenge/ {
+        root {{ webserver_acme_webroot }};
+        default_type "text/plain";
+        allow all;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+{% endif %}
+server {
+{% if webserver_tls_active | default(false) %}
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    http2 on;
+
+    ssl_certificate {{ webserver_tls_cert_dir }}/fullchain.pem;
+    ssl_certificate_key {{ webserver_tls_cert_dir }}/privkey.pem;
+    ssl_trusted_certificate {{ webserver_tls_cert_dir }}/chain.pem;
+
+    # Mozilla "intermediate" profile: TLS 1.2 and 1.3 only, forward secrecy,
+    # no server cipher preference (clients pick, which favours ChaCha20 on
+    # mobile).
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305;
+
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    ssl_stapling on;
+    ssl_stapling_verify on;
+{% if webserver_tls_hsts %}
+
+    # Only sent over HTTPS, so a host that later drops TLS is not permanently
+    # bricked for clients that already saw this header.
+    add_header Strict-Transport-Security "max-age={{ webserver_tls_hsts_max_age }}" always;
+{% endif %}
+{% else %}
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root {{ webserver_acme_webroot }};
+        default_type "text/plain";
+        allow all;
+    }
+{% endif %}
 
     server_name {{ webserver_sitename }};
     root {{ drupal_base_path }}/web; ## <-- Your only path reference.
@@ -93,9 +152,6 @@ server {
         # Ensure the php file exists. Mitigates CVE-2019-11043
         try_files $fastcgi_script_name =404;
 
-        # Security note: If you're running a version of PHP older than the
-        # latest 5.3, you should have "cgi.fix_pathinfo = 0;" in php.ini.
-        # See http://serverfault.com/q/627903/94922 for details.
         include fastcgi_params;
 
         # Block httpoxy attacks. See https://httpoxy.org/.
@@ -104,6 +160,12 @@ server {
         fastcgi_param PATH_INFO $fastcgi_path_info;
         fastcgi_param QUERY_STRING $query_string;
         fastcgi_intercept_errors on;
+{% if webserver_tls_active | default(false) %}
+
+        # Without this Drupal cannot tell the request arrived over TLS and
+        # generates http:// URLs in links, redirects and password reset mails.
+        fastcgi_param HTTPS on;
+{% endif %}
 
         fastcgi_read_timeout 300;
         fastcgi_buffers 16 16k;

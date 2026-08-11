@@ -3,5 +3,12 @@
 - name: Install the web server and PHP
   ansible.builtin.import_tasks: 01_webserver_php_install.yml
 
+- name: Tune PHP
+  ansible.builtin.import_tasks: 02_php_tuning.yml
+
 - name: Configure the web server vhost
-  ansible.builtin.import_tasks: 02_webserver_vhost_config.yml
+  ansible.builtin.import_tasks: 03_webserver_vhost_config.yml
+
+- name: Configure TLS
+  ansible.builtin.import_tasks: 04_tls.yml
+  when: webserver_tls_enabled

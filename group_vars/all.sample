@@ -22,10 +22,60 @@ webserver_email: example@example.com
 
 webserver_max_body_size: 64M
 
+# TLS via Let's Encrypt. Requires webserver_sitename to be a public hostname
+# that resolves to this server, with port 80 reachable from the internet for
+# the ACME HTTP-01 challenge. Enabling this redirects all HTTP to HTTPS.
+webserver_tls_enabled: false
+webserver_tls_email: example@example.com
+
+# http-01 (default) serves a challenge file over port 80 and needs the host to
+# be reachable from the internet. dns-01 writes a TXT record through the
+# Cloudflare API instead, which is what an internal or firewalled host needs --
+# the server itself never has to accept inbound connections.
+webserver_tls_challenge: http-01
+
+# Required for dns-01. A Cloudflare API token scoped to Zone:DNS:Edit on this
+# zone. SECRET -- put it in an ansible-vault encrypted file, not here.
+# webserver_tls_cloudflare_token: "{{ vault_cloudflare_token }}"
+
+# Set true while testing. Issues an untrusted certificate from the Let's
+# Encrypt staging CA, which has far looser rate limits than production
+# (production allows only 5 duplicate certificates per week).
+webserver_tls_staging: false
+
 # The account the web server runs as. Ubuntu's nginx and apache2 packages both
 # use www-data; there is rarely a reason to change this.
 webserver_user: www-data
 webserver_group: www-data
+
+
+#
+# PHP tuning
+#
+# Written as a conf.d drop-in; the packaged php.ini is never edited. See
+# roles/web/defaults/main.yml for the full set of knobs and their defaults.
+#
+
+php_memory_limit: 256M
+php_max_execution_time: 60
+
+# These default to webserver_max_body_size so the PHP and web server limits
+# cannot drift apart. Override only if you need them to differ.
+# php_upload_max_filesize: 64M
+# php_post_max_size: 64M
+
+php_opcache_memory_consumption: 192
+php_apcu_shm_size: 64M
+
+# pm.max_children caps concurrent PHP requests. Budget roughly
+# max_children * php_memory_limit as the worst case, and lower it on a small VM.
+php_fpm_pool_settings:
+  pm: dynamic
+  pm.max_children: 20
+  pm.start_servers: 4
+  pm.min_spare_servers: 2
+  pm.max_spare_servers: 6
+  pm.max_requests: 500
 
 
 #

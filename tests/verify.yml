@@ -14,6 +14,10 @@
     drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
     webserver_type: nginx
     webserver_user: www-data
+    webserver_tls_enabled: false
+    webserver_sitename: localhost
+    webserver_max_body_size: 64M
+    php_memory_limit: 256M
 
   tasks:
 
@@ -131,3 +135,111 @@
         path: "{{ drupal_base_path }}/web/{{ verify_config_sync.stdout | trim }}"
       register: verify_config_sync_dir
       failed_when: not verify_config_sync_dir.stat.exists
+
+
+    #
+    # PHP tuning
+    #
+
+    # `php-fpm -i` reports the FPM SAPI's own configuration. Reading these
+    # through drush or `php` would report the CLI SAPI instead, which loads a
+    # different conf.d and forces max_execution_time to 0 -- so a CLI-based
+    # check would pass even if the FPM drop-in were missing entirely.
+    - name: Read the effective PHP-FPM settings
+      ansible.builtin.command:
+        cmd: "php-fpm{{ verify_php_version.stdout | trim }} -i"
+      register: verify_php_ini
+      changed_when: false
+
+    # php -i prints "key => local_value => master_value". Lines that do not
+    # match that shape (section headers, multi-line values) yield None from
+    # regex_search and are dropped rather than corrupting the dict.
+    - name: Parse the effective PHP-FPM settings
+      ansible.builtin.set_fact:
+        verify_php: >-
+          {{ dict(verify_php_ini.stdout_lines
+                  | map('regex_search', '^([a-z_][a-z0-9_.]*) => (.*?) => (.*)$', '\1', '\2')
+                  | select('ne', None)
+                  | list) }}
+
+    - name: Assert the PHP tuning is in effect for the FPM SAPI
+      ansible.builtin.assert:
+        that:
+          - verify_php['memory_limit'] == php_memory_limit
+          - verify_php['max_input_vars'] | int >= 2000
+          - verify_php['max_execution_time'] | int > 0
+          - verify_php['opcache.enable'] == 'On'
+          - verify_php['expose_php'] == 'Off'
+        fail_msg: >-
+          PHP-FPM drop-in settings are not in effect:
+          memory_limit={{ verify_php['memory_limit'] | default('?') }}
+          max_execution_time={{ verify_php['max_execution_time'] | default('?') }}
+          opcache={{ verify_php['opcache.enable'] | default('?') }}
+
+    - name: Assert APCu is available to the FPM SAPI
+      ansible.builtin.assert:
+        that:
+          - "'apcu' in verify_php_ini.stdout"
+        fail_msg: "APCu is not loaded in PHP-FPM; Drupal's status report will flag the cache backend."
+
+    - name: Assert the PHP and web server upload limits agree
+      ansible.builtin.assert:
+        that:
+          - verify_php['upload_max_filesize'] | upper == webserver_max_body_size | upper
+        fail_msg: >-
+          upload_max_filesize ({{ verify_php['upload_max_filesize'] }}) does not
+          match the web server body limit ({{ webserver_max_body_size }}), which
+          produces confusing 413s at the boundary.
+
+
+    #
+    # TLS -- only checked when webserver_tls_enabled is true
+    #
+
+    - name: Assert HTTP redirects to HTTPS
+      ansible.builtin.uri:
+        url: "http://{{ webserver_sitename }}/"
+        follow_redirects: none
+        status_code: 301
+      register: verify_redirect
+      failed_when: >-
+        verify_redirect.location is not defined
+        or not verify_redirect.location.startswith('https://')
+      when: webserver_tls_enabled
+
+    - name: Assert the site serves over HTTPS with a valid certificate
+      ansible.builtin.uri:
+        url: "https://{{ webserver_sitename }}/"
+        status_code: 200
+        return_content: true
+        validate_certs: "{{ not webserver_tls_staging | default(false) }}"
+      register: verify_https
+      when: webserver_tls_enabled
+
+    # The uri module exposes response headers as lowercased top-level keys with
+    # dashes turned into underscores.
+    - name: Assert HSTS is set and Drupal knows the request was over TLS
+      ansible.builtin.assert:
+        that:
+          - verify_https.strict_transport_security is defined
+          - "'Drupal' in verify_https.content"
+          - "'http://' ~ webserver_sitename not in verify_https.content"
+        fail_msg: >-
+          HTTPS responded but either HSTS is missing or Drupal is still
+          generating http:// URLs (check fastcgi_param HTTPS on).
+      when: webserver_tls_enabled
+
+    - name: Assert the certbot renewal timer is active
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['certbot.timer'].state == 'running'
+        fail_msg: "certbot.timer is not active; certificates will not auto-renew."
+      when: webserver_tls_enabled
+
+    - name: Check the certificate is not close to expiry
+      ansible.builtin.command:
+        cmd: "openssl x509 -in /etc/letsencrypt/live/{{ webserver_sitename }}/fullchain.pem -noout -checkend 1209600"
+      register: verify_cert_expiry
+      changed_when: false
+      failed_when: verify_cert_expiry.rc != 0
+      when: webserver_tls_enabled

@@ -79,6 +79,63 @@ system root. That is stronger than storing a root password in a vars file, and i
 one less secret to manage.
 
 
+### TLS
+
+Off by default. Enable it in `group_vars/all`:
+
+```yaml
+webserver_tls_enabled: true
+webserver_tls_email: you@example.com
+```
+
+Enabling TLS redirects all HTTP traffic to HTTPS, serves HTTP/2, sends HSTS, and
+passes `fastcgi_param HTTPS on` so Drupal generates `https://` URLs in links,
+redirects and password reset mails. Certificates renew through the `certbot.timer`
+that ships with the package, and a deploy hook reloads the web server when a renewal
+actually happens.
+
+Two validation methods are supported via `webserver_tls_challenge`:
+
+- **`http-01`** (default) — certbot answers a challenge on port 80. Requires the host
+  to be reachable from the internet. Uses `--webroot` against a dedicated ACME
+  directory rather than certbot's nginx/apache plugins, so certbot never rewrites the
+  vhost that Ansible manages.
+- **`dns-01`** — proves control by writing a TXT record through the Cloudflare API.
+  Use this when the server is internal, firewalled, or resolves to a private address,
+  since it needs no inbound connectivity at all. Requires a Cloudflare API token
+  scoped to `Zone:DNS:Edit` on the zone:
+
+```yaml
+webserver_tls_challenge: dns-01
+webserver_tls_cloudflare_token: "{{ vault_cloudflare_token }}"
+```
+
+Set `webserver_tls_staging: true` while testing. It issues an untrusted certificate
+from the Let's Encrypt staging CA, which has far looser rate limits than production
+(production allows only 5 duplicate certificates per week).
+
+
+### PHP tuning
+
+PHP settings are written as a drop-in at `/etc/php/<version>/{cli,fpm}/conf.d/99-drupal.ini`.
+The packaged `php.ini` is never edited, so a PHP package upgrade cannot produce a
+conffile prompt or silently revert these values.
+
+Ubuntu's stock `memory_limit` (128M) and `max_execution_time` (30) are both low for
+Drupal with a real module set, and `max_input_vars` (1000) silently truncates large
+admin forms. The defaults here raise those, enable and size OPcache and APCu, and
+grow the realpath cache. See `roles/web/defaults/main.yml` for the full list.
+
+`php_upload_max_filesize` and `php_post_max_size` default to `webserver_max_body_size`
+so the PHP and web server limits cannot drift apart — a mismatch produces confusing
+413s at the boundary.
+
+PHP-FPM process manager settings live in the pool file rather than php.ini and are set
+individually via `php_fpm_pool_settings`, leaving the rest of the packaged pool intact.
+Budget roughly `pm.max_children * php_memory_limit` as the worst-case memory use and
+lower it on a small VM.
+
+
 ### Usage
 
 ```bash
@@ -112,6 +169,14 @@ rather than a PHP error, that Drupal bootstraps, that the hash salt is non-empty
 where Drupal actually looks for it. It also reports any error-severity items on the
 Drupal status report.
 
+PHP settings are read via `php-fpm -i` rather than the `php` CLI, because the two SAPIs
+load different `conf.d` directories — a CLI-based check would pass even if the FPM
+drop-in were missing entirely.
+
+When `webserver_tls_enabled` is true it additionally checks the HTTP-to-HTTPS redirect,
+the certificate chain, HSTS, that Drupal is emitting `https://` URLs, that
+`certbot.timer` is active, and that the certificate is not within two weeks of expiry.
+
 Lint before committing:
 
 ```bash
@@ -141,8 +206,10 @@ ansible-lint && yamllint .
 
 ### ToDo
 
-- Enable php.ini best-practices and tuning from `group_vars/all`
-- TLS / certbot support
+- Apache TLS vhost is implemented but has only been tested with nginx
+- Scheduled `drush cron` via a systemd timer. Cron currently runs only on install and
+  when modules change; a long-running site needs it on a schedule.
+- Database and files backups
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.
   The DB user is still granted from `localhost` only.

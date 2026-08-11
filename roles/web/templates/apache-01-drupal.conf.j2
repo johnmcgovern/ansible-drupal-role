@@ -2,17 +2,60 @@
 <VirtualHost *:80>
 
 	ServerName {{ webserver_sitename }}
-
 	ServerAdmin {{ webserver_email }}
-	DocumentRoot {{ drupal_base_path }}/web
 
-	ErrorLog ${APACHE_LOG_DIR}/error.log
-	CustomLog ${APACHE_LOG_DIR}/access.log combined
+	# Served from the filesystem so the challenge works before Drupal exists.
+	Alias /.well-known/acme-challenge/ {{ webserver_acme_webroot }}/.well-known/acme-challenge/
+	<Directory {{ webserver_acme_webroot }}/.well-known/acme-challenge/>
+		Require all granted
+	</Directory>
+
+{% if webserver_tls_active | default(false) %}
+	RewriteEngine On
+	RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+	RewriteRule ^(.*)$ https://%{HTTP_HOST}$1 [R=301,L]
+{% else %}
+	DocumentRoot {{ drupal_base_path }}/web
 
 	<Directory {{ drupal_base_path }}/web>
 		Options FollowSymLinks
 		# Drupal ships a .htaccess that does the clean-URL rewriting and a
 		# large amount of hardening, so it needs to be honoured here.
+		AllowOverride All
+		Require all granted
+	</Directory>
+
+	<Directory {{ drupal_base_path }}>
+		Require all denied
+	</Directory>
+{% endif %}
+
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+</VirtualHost>
+{% if webserver_tls_active | default(false) %}
+
+<VirtualHost *:443>
+
+	ServerName {{ webserver_sitename }}
+	ServerAdmin {{ webserver_email }}
+	DocumentRoot {{ drupal_base_path }}/web
+
+	SSLEngine on
+	SSLCertificateFile {{ webserver_tls_cert_dir }}/fullchain.pem
+	SSLCertificateKeyFile {{ webserver_tls_cert_dir }}/privkey.pem
+
+	SSLProtocol -all +TLSv1.2 +TLSv1.3
+	SSLHonorCipherOrder off
+	SSLSessionTickets off
+{% if webserver_tls_hsts %}
+
+	Header always set Strict-Transport-Security "max-age={{ webserver_tls_hsts_max_age }}"
+{% endif %}
+
+	<Directory {{ drupal_base_path }}/web>
+		Options FollowSymLinks
 		AllowOverride All
 		Require all granted
 	</Directory>
@@ -23,6 +66,10 @@
 		Require all denied
 	</Directory>
 
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+
 </VirtualHost>
+{% endif %}
 
 # vim: syntax=apache ts=4 sw=4 sts=4 sr noet

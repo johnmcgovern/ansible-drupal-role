@@ -16,6 +16,42 @@ webserver_email: admin@example.com
 # php.ini upload_max_filesize so the two do not disagree.
 webserver_max_body_size: 64M
 
+
+#
+# TLS
+#
+# Off by default: Let's Encrypt validates over HTTP on port 80, so it only
+# works once webserver_sitename is a public hostname resolving to this server.
+# Enabling it always redirects port 80 to 443.
+webserver_tls_enabled: false
+
+# Account address for the Let's Encrypt registration and expiry notices.
+webserver_tls_email: "{{ webserver_email }}"
+
+# http-01 validates by serving a file over port 80, so the host must be
+# reachable from the internet. dns-01 validates by writing a TXT record via the
+# Cloudflare API instead, which is what an internal or firewalled host needs.
+webserver_tls_challenge: http-01
+
+# Cloudflare API token with Zone:DNS:Edit on the zone. Required for dns-01.
+# Keep this in an ansible-vault encrypted file.
+webserver_tls_cloudflare_token: ""
+webserver_tls_cloudflare_credentials: /etc/letsencrypt/cloudflare.ini
+webserver_tls_dns_propagation_seconds: 30
+
+# Use the Let's Encrypt staging CA. Issues an untrusted certificate but has far
+# looser rate limits, so use it while testing a new host.
+webserver_tls_staging: false
+
+webserver_tls_hsts: true
+webserver_tls_hsts_max_age: 31536000   # 1 year
+
+# Dedicated ACME webroot, kept separate from the Drupal docroot so challenges
+# can be answered before Drupal is installed and without punching a hole in the
+# docroot's hidden-file rules.
+webserver_acme_webroot: /var/www/letsencrypt
+webserver_tls_cert_dir: "/etc/letsencrypt/live/{{ webserver_sitename }}"
+
 # PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache.
 # php-uploadprogress ships in the noble universe component, so no third-party
 # PPA is required on 24.04.
@@ -24,6 +60,52 @@ webserver_max_body_size: 64M
 # php8.3, whose first Depends alternative is libapache2-mod-php8.3, so apt
 # installs apache2 as a side effect -- which then binds port 80 and stops nginx
 # from starting. php-cli gives the same interpreter without the web server.
+#
+# PHP tuning
+#
+# Applied as a conf.d drop-in, so the packaged php.ini is never edited.
+
+php_memory_limit: 256M
+php_max_execution_time: 60
+php_max_input_time: 60
+php_max_input_vars: 2000
+
+# Defaults to the web server's body limit so the two cannot drift apart. An
+# upload_max_filesize above client_max_body_size just produces a confusing 413.
+php_upload_max_filesize: "{{ webserver_max_body_size }}"
+php_post_max_size: "{{ webserver_max_body_size }}"
+
+php_expose_php: "Off"
+
+php_opcache_enable: 1
+php_opcache_enable_cli: 0
+php_opcache_memory_consumption: 192
+php_opcache_interned_strings_buffer: 16
+php_opcache_max_accelerated_files: 20000
+# Leave timestamp validation on. Turning it off is faster but means deployed
+# code changes are not picked up until PHP-FPM is restarted.
+php_opcache_validate_timestamps: 1
+php_opcache_revalidate_freq: 60
+php_opcache_max_wasted_percentage: 5
+
+php_apcu_shm_size: 64M
+
+php_realpath_cache_size: 4096K
+php_realpath_cache_ttl: 600
+
+php_session_cookie_samesite: Lax
+
+# PHP-FPM process manager. max_children is the ceiling on concurrent PHP
+# requests; at the 256M memory_limit above, 20 children is roughly 5 GB worst
+# case, so lower it on a small VM.
+php_fpm_pool_settings:
+  pm: dynamic
+  pm.max_children: 20
+  pm.start_servers: 4
+  pm.min_spare_servers: 2
+  pm.max_spare_servers: 6
+  pm.max_requests: 500
+
 php_packages:
   - php-apcu
   - php-cli

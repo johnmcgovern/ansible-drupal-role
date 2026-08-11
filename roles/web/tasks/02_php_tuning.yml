@@ -1,0 +1,37 @@
+---
+
+# A drop-in in conf.d rather than edits to the packaged php.ini: files there are
+# loaded in name order after php.ini, so 99- wins, and a PHP package upgrade
+# can never produce a conffile prompt or silently revert these settings.
+- name: Write the PHP drop-in configuration
+  ansible.builtin.template:
+    src: php-drupal.ini.j2
+    dest: "/etc/php/{{ php_version }}/{{ item }}/conf.d/99-drupal.ini"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ ['cli', 'fpm'] if webserver_type == 'nginx' else ['cli', 'apache2'] }}"
+  notify: "{{ 'Restart php-fpm' if webserver_type == 'nginx' else 'Restart apache2' }}"
+
+# Process manager settings live in the pool file, not php.ini, so they cannot
+# go in the drop-in above. Editing the individual keys leaves the rest of the
+# packaged pool definition intact.
+- name: Tune the PHP-FPM process manager
+  community.general.ini_file:
+    path: "/etc/php/{{ php_version }}/fpm/pool.d/www.conf"
+    section: www
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    owner: root
+    group: root
+    mode: "0644"
+    no_extra_spaces: true
+  loop: "{{ php_fpm_pool_settings | dict2items }}"
+  when: webserver_type == 'nginx'
+  notify: Restart php-fpm
+
+- name: Validate the PHP-FPM configuration
+  ansible.builtin.command:
+    cmd: "php-fpm{{ php_version }} --test"
+  changed_when: false
+  when: webserver_type == 'nginx'

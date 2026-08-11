@@ -1,18 +1,23 @@
 ---
 
+# First pass: HTTP only. The TLS block is enabled later by 03_tls.yml, once a
+# certificate actually exists on disk -- referencing a missing certificate file
+# makes nginx refuse to start.
+- name: Write the web server vhost (HTTP)
+  ansible.builtin.include_tasks: _write_vhost.yml
+
+- name: Create the ACME challenge webroot
+  ansible.builtin.file:
+    path: "{{ webserver_acme_webroot }}/.well-known/acme-challenge"
+    state: directory
+    owner: root
+    group: "{{ webserver_group }}"
+    mode: "0755"
+
+
 #
 # Apache
 #
-
-- name: Write Apache2 vhost conf file
-  ansible.builtin.template:
-    src: apache-01-drupal.conf.j2
-    dest: /etc/apache2/sites-available/01-drupal.conf
-    owner: root
-    group: root
-    mode: "0644"
-  when: webserver_type == 'apache'
-  notify: Restart apache2
 
 - name: Disable the Apache2 default vhost
   ansible.builtin.file:
@@ -40,16 +45,6 @@
 #
 # Nginx
 #
-
-- name: Write Nginx conf file
-  ansible.builtin.template:
-    src: nginx-drupal.j2
-    dest: /etc/nginx/sites-available/drupal
-    owner: root
-    group: root
-    mode: "0644"
-  when: webserver_type == 'nginx'
-  notify: Restart nginx
 
 - name: Disable the Nginx default site
   ansible.builtin.file:
@@ -80,3 +75,8 @@
     state: started
     enabled: true
   when: webserver_type == 'nginx'
+
+# The ACME HTTP-01 challenge is answered on port 80 by the vhost just written,
+# so the web server has to be reloaded before certbot runs.
+- name: Apply the pending web server restart before requesting a certificate
+  ansible.builtin.meta: flush_handlers
