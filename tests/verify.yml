@@ -22,6 +22,13 @@
     verify_max_body_size: "{{ webserver_max_body_size | default('64M') }}"
     verify_memory_limit: "{{ php_memory_limit | default('256M') }}"
     verify_tls_enabled: "{{ webserver_tls_enabled | default(false) | bool }}"
+    # Status report items that cannot be resolved on Ubuntu 24.04. "GD library"
+    # is a warning purely because GD lacks AVIF: neither Ubuntu's php8.3-gd nor
+    # the ondrej PPA build has AVIF compiled in (verified by inspecting both
+    # binaries), because noble's libgd3 is not built against libavif. Clearing
+    # it would mean building PHP's gd extension from source.
+    verify_status_allowed:
+      - GD library
     verify_tls_staging: "{{ webserver_tls_staging | default(false) | bool }}"
     # A staging certificate is signed by an untrusted CA by design, so chain
     # validation has to be off for those runs. Everything else is still checked.
@@ -96,20 +103,40 @@
       changed_when: false
       failed_when: "'Successful' not in verify_bootstrap.stdout"
 
+    # severity=1 catches warnings as well as errors, so this asserts the goal of
+    # a genuinely clean status page rather than merely an error-free one.
     - name: Read the Drupal status report
       ansible.builtin.command:
-        cmd: "{{ verify_drush }} core:requirements --format=json --severity=2"
+        cmd: "{{ verify_drush }} core:requirements --format=json --severity=1"
         chdir: "{{ verify_base_path }}"
       register: verify_requirements
       changed_when: false
       failed_when: false
 
-    - name: Report any Drupal status page errors
+    - name: Collect the outstanding status report items
+      ansible.builtin.set_fact:
+        verify_status_items: >-
+          {{ (verify_requirements.stdout | from_json).values() | map(attribute='title') | list
+             if (verify_requirements.stdout | trim | length) > 2 else [] }}
+
+    - name: Report the Drupal status page state
       ansible.builtin.debug:
         msg: >-
-          {{ (verify_requirements.stdout | from_json).values() | map(attribute='title') | list
-             if verify_requirements.stdout | trim | length > 2
-             else 'No severity-2 (error) items on the Drupal status report.' }}
+          {{ 'Drupal status report is completely clean.' if verify_status_items | length == 0
+             else 'Outstanding status report items: ' ~ (verify_status_items | join(', ')) }}
+
+    # The allowlist is deliberately explicit rather than a blanket skip, so a
+    # newly appearing warning fails the run instead of hiding behind a known one.
+    - name: Assert no unexpected status report warnings or errors
+      ansible.builtin.assert:
+        that:
+          - verify_status_items | difference(verify_status_allowed) | length == 0
+        fail_msg: >-
+          Unexpected Drupal status report items:
+          {{ verify_status_items | difference(verify_status_allowed) | join(', ') }}
+        success_msg: >-
+          {{ 'Status report clean.' if verify_status_items | length == 0
+             else 'Only known-unfixable items remain: ' ~ (verify_status_items | join(', ')) }}
 
     - name: Assert the hash salt is present and non-empty
       ansible.builtin.command:

@@ -90,6 +90,10 @@ db_service: mariadb
 db_host: localhost
 db_port: 3306
 
+# Drupal recommends READ-COMMITTED; MariaDB defaults to REPEATABLE-READ, which
+# the Drupal status report flags as a warning.
+db_transaction_isolation: READ-COMMITTED
+
 db_name: drupal
 db_user: drupal_user
 db_user_password: CHANGEME   # SECRET
@@ -108,6 +112,11 @@ drupal_region: en
 
 drupal_admin: admin
 drupal_admin_password: CHANGEME   # SECRET
+
+# Drupal 12 will default this to FALSE. Setting it explicitly clears a status
+# report warning and pins the behaviour across a major upgrade. Set true to keep
+# browser-side HTML5 form validation enabled.
+drupal_enable_html5_validation: false
 
 # Host header protection. Leave as an empty list to disable. When set, requests
 # whose Host header matches none of these regular expressions are rejected, so

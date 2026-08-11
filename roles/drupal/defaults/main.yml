@@ -33,6 +33,11 @@ db_host: localhost
 # the site unreachable, so it is opt-in. Supply a list of regular expressions.
 drupal_trusted_host_patterns: []
 
+# Drupal 12 will default this to FALSE. Defaulting to FALSE here matches that
+# future behaviour, so a major upgrade does not silently change how forms
+# validate. Set true to keep browser-side HTML5 validation on.
+drupal_enable_html5_validation: false
+
 drupal_install_modules: []
 drupal_enable_modules: []
 

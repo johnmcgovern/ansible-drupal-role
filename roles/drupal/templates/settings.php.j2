@@ -18,6 +18,12 @@ $settings['file_scan_ignore_directories'] = [
 
 $settings['entity_update_batch_size'] = 50;
 
+// Drupal 12 will default this to FALSE. Leaving it unset raises a warning on
+// the status report; setting it explicitly both silences that and pins the
+// behaviour so a major upgrade cannot change form validation underneath you.
+// https://www.drupal.org/node/3537128
+$settings['enable_html5_validation'] = {{ 'TRUE' if drupal_enable_html5_validation else 'FALSE' }};
+
 $settings['config_sync_directory'] = '{{ drupal_config_sync_relative }}';
 
 $databases['default']['default'] = [

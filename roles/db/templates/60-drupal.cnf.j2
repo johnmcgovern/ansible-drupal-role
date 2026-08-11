@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+#
+# Drupal-specific MariaDB tuning.
+
+[mysqld]
+# Drupal recommends READ-COMMITTED. MariaDB's default of REPEATABLE-READ raises
+# a warning on the status report and can produce deadlocks under concurrent
+# writes to the same tables.
+# https://www.drupal.org/docs/system-requirements/setting-the-mysql-transaction-isolation-level
+transaction-isolation = {{ db_transaction_isolation }}
+
+# READ-COMMITTED requires row-based binary logging. Binary logging is off by
+# default on Ubuntu, but setting this now means enabling it later (for
+# replication or point-in-time recovery) cannot fail with an incompatible
+# format error.
+binlog_format = {{ db_binlog_format }}
+
+character-set-server = utf8mb4
+collation-server = utf8mb4_general_ci

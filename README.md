@@ -188,6 +188,29 @@ ansible-lint && yamllint .
 ```
 
 
+### Drupal status report
+
+The goal is a clean status report out of the box. Three items that Drupal warns about
+by default are handled:
+
+- **Transaction isolation level** — MariaDB defaults to `REPEATABLE-READ`; Drupal
+  recommends `READ-COMMITTED`. Set via a drop-in at
+  `/etc/mysql/mariadb.conf.d/60-drupal.cnf`, along with `binlog_format = ROW`, which
+  `READ-COMMITTED` requires if binary logging is ever enabled.
+- **HTML5 validation** — leaving `enable_html5_validation` unset raises a warning
+  because Drupal 12 will change its default. It is now set explicitly, defaulting to
+  `false` to match that future default so a major upgrade cannot silently change how
+  forms validate. Set `drupal_enable_html5_validation: true` to keep browser-side
+  validation on.
+- **AVIF / GD library** — *not fixable on Ubuntu 24.04.* Noble's `libgd3` is not built
+  against `libavif`, and PHP's gd extension bakes format support in at compile time.
+  Neither Ubuntu's `php8.3-gd` nor the ondrej PPA build contains a single AVIF symbol,
+  so switching to that PPA would add third-party-repo risk without fixing anything.
+  Clearing this would require building PHP's gd extension from source against a
+  libgd with AVIF. `tests/verify.yml` therefore allows exactly this one item, by name,
+  so that any *other* warning still fails the run.
+
+
 ### Notes
 
 - `webserver_type` selects `nginx` (default) or `apache`.
