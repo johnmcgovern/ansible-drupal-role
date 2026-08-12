@@ -1,0 +1,78 @@
+---
+
+- name: Install the Drupal cron service unit
+  ansible.builtin.template:
+    src: drupal-cron.service.j2
+    dest: /etc/systemd/system/drupal-cron.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: drupal_cron_service_unit
+  notify: Reload systemd
+
+- name: Install the Drupal cron timer unit
+  ansible.builtin.template:
+    src: drupal-cron.timer.j2
+    dest: /etc/systemd/system/drupal-cron.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: drupal_cron_timer_unit
+  notify: Reload systemd
+
+- name: Apply the pending systemd reload
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the Drupal cron timer
+  ansible.builtin.systemd_service:
+    name: drupal-cron.timer
+    state: started
+    enabled: true
+
+# Drupal's automated_cron module runs cron during ordinary page requests, which
+# makes a visitor pay for it and gives no scheduling guarantee. With a real
+# timer in place it should be off. Setting the interval to 0 disables it without
+# uninstalling the module, so this is reversible.
+- name: Read the current automated_cron interval
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} config:get automated_cron.settings interval --format=string"
+    chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
+  register: drupal_automated_cron
+  changed_when: false
+  failed_when: false
+
+- name: Disable Drupal's request-triggered automated cron
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} config:set automated_cron.settings interval 0 --yes"
+    chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
+  when: (drupal_automated_cron.stdout | trim) not in ['0', '']
+  changed_when: true
+
+# Proves the unit works under its own user and hardening rather than waiting for
+# the first scheduled run to discover a permissions problem. Only fires when a
+# unit file actually changed: a Type=oneshot service is inactive once it
+# finishes, so starting it unconditionally would report changed on every run.
+# This cannot be a handler because the result is checked immediately below.
+- name: Run the cron unit once to verify it succeeds  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    name: drupal-cron.service
+    state: started
+  when:
+    - drupal_cron_run_on_deploy
+    - drupal_cron_service_unit.changed or drupal_cron_timer_unit.changed
+
+# Reading status only; systemd_service changes nothing without state/enabled.
+# An empty Result means the unit has not run yet, which is only valid when the
+# one-off run above was skipped.
+- name: Check the result of the cron unit
+  ansible.builtin.systemd_service:
+    name: drupal-cron.service
+  register: drupal_cron_result
+  changed_when: false
+  failed_when: drupal_cron_result.status.Result not in ['success', '']

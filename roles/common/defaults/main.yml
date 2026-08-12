@@ -7,6 +7,10 @@ webserver_group: www-data
 # Packages needed by later roles (Composer needs unzip/git, MySQL modules need
 # python3-pymysql, which is installed by the db role).
 common_packages:
+  # acl lets Ansible hand a temp file to an unprivileged become_user without
+  # making it world readable. Drush runs as the web server account so that its
+  # caches are not written as root.
+  - acl
   - ca-certificates
   - curl
   - git

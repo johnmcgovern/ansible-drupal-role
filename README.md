@@ -188,6 +188,33 @@ ansible-lint && yamllint .
 ```
 
 
+### Cron
+
+Drupal needs cron for queue processing, cache expiry, search indexing and update
+checks. A systemd timer (`drupal-cron.timer`) runs `drush cron` on a schedule, and
+Drupal's `automated_cron` module is disabled by setting its interval to 0 — that module
+only runs cron during page requests, so a visitor pays for it and there is no
+scheduling guarantee.
+
+```yaml
+drupal_cron_enabled: true
+drupal_cron_on_calendar: hourly   # any systemd OnCalendar expression, e.g. "*:0/15"
+```
+
+The timer uses `Persistent=true`, so a run missed while the host was down happens once
+on boot rather than being skipped, and `RandomizedDelaySec` to add jitter.
+
+The unit runs as the **web server account, not root**. Bootstrapping Drupal writes a
+Twig cache under `sites/default/files`; doing that as root leaves files the web server
+cannot subsequently rewrite. For the same reason every `drush` invocation in these
+roles runs as that account (which is why `acl` is installed — Ansible needs it to hand
+a temp file to an unprivileged `become_user`). `tests/verify.yml` asserts there are no
+root-owned files under `files/`, so a regression here fails the run.
+
+On deploy the unit is run once to prove it works under its own user and hardening,
+rather than discovering a permissions problem at the first scheduled run.
+
+
 ### Drupal status report
 
 The goal is a clean status report out of the box. Three items that Drupal warns about
@@ -283,8 +310,6 @@ warning, because Drupal checks GD regardless of the active toolkit.
 ### ToDo
 
 - Apache TLS vhost is implemented but has only been tested with nginx
-- Scheduled `drush cron` via a systemd timer. Cron currently runs only on install and
-  when modules change; a long-running site needs it on a schedule.
 - Database and files backups
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.

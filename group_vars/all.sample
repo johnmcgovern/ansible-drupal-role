@@ -129,6 +129,12 @@ drupal_sitename: Drupal Test Site
 drupal_email: example@example.com
 drupal_region: en
 
+# Cron. A systemd timer runs drush cron on this schedule and Drupal's
+# request-triggered automated_cron module is disabled. Any systemd OnCalendar
+# expression works; use "*:0/15" for every fifteen minutes on a busy site.
+drupal_cron_enabled: true
+drupal_cron_on_calendar: hourly
+
 drupal_admin: admin
 drupal_admin_password: CHANGEME   # SECRET
 

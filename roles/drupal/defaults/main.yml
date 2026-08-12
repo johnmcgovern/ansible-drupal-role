@@ -25,6 +25,13 @@ drupal_hash_salt_file: "{{ drupal_base_path }}/.hash_salt"
 
 drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
 
+# Drush bootstraps Drupal, which writes the twig cache under
+# sites/default/files. Running it as root leaves root-owned files there that the
+# web server cannot rewrite, so every drush invocation runs as the web server
+# account instead. www-data's home is not writable, hence the explicit HOME.
+drupal_drush_env:
+  HOME: /tmp
+
 # Database host as seen from the web server. Kept as a variable so the web and
 # db tiers can be split across hosts; settings.php no longer hardcodes localhost.
 db_host: localhost
@@ -37,6 +44,27 @@ drupal_trusted_host_patterns: []
 # future behaviour, so a major upgrade does not silently change how forms
 # validate. Set true to keep browser-side HTML5 validation on.
 drupal_enable_html5_validation: false
+
+#
+# Cron
+#
+# Drupal needs cron for queue processing, cache expiry, search indexing and
+# update checks. A systemd timer replaces Drupal's automated_cron module, which
+# only runs during page requests and so makes a visitor wait for it.
+drupal_cron_enabled: true
+
+# systemd OnCalendar expression. "hourly" suits most sites; a busy site with
+# queues or search indexing may want "*:0/15" for every fifteen minutes.
+drupal_cron_on_calendar: hourly
+
+# Jitter, so several sites on one host do not all fire simultaneously.
+drupal_cron_randomized_delay: 300
+
+drupal_cron_timeout: 600
+
+# Run the unit once during deployment to prove it works, rather than finding out
+# at the first scheduled run.
+drupal_cron_run_on_deploy: true
 
 drupal_install_modules: []
 drupal_enable_modules: []

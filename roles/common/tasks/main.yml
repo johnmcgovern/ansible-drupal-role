@@ -11,10 +11,14 @@
       ({{ ansible_distribution_release }}).
     success_msg: "Ubuntu 24.04 LTS (noble) detected."
 
+# Refreshing the package index is not a change to system state, so it is not
+# reported as one. Otherwise every run made more than cache_valid_time after the
+# last one reports a change and idempotency can never be measured.
 - name: Update apt package index
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+  changed_when: false
 
 - name: Install common packages
   ansible.builtin.apt:

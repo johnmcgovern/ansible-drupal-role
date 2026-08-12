@@ -1,0 +1,19 @@
+[Unit]
+# {{ ansible_managed }}
+Description=Schedule Drupal cron for {{ webserver_sitename }}
+
+[Timer]
+OnCalendar={{ drupal_cron_on_calendar }}
+
+# Spreads the load when several sites share a host, and stops every Drupal
+# install on the planet hitting update.drupal.org exactly on the hour.
+RandomizedDelaySec={{ drupal_cron_randomized_delay }}
+
+# Runs a missed occurrence once the machine is back, rather than silently
+# skipping every run the host was down for.
+Persistent=true
+
+Unit=drupal-cron.service
+
+[Install]
+WantedBy=timers.target

@@ -32,6 +32,7 @@
       {{ [] if (php_gd_avif_build | default(false) | bool) else ['GD library'] }}
     verify_tls_staging: "{{ webserver_tls_staging | default(false) | bool }}"
     verify_gd_avif: "{{ php_gd_avif_build | default(false) | bool }}"
+    verify_cron_enabled: "{{ drupal_cron_enabled | default(true) | bool }}"
     # A staging certificate is signed by an untrusted CA by design, so chain
     # validation has to be off for those runs. Everything else is still checked.
     verify_validate_certs: "{{ not (webserver_tls_staging | default(false) | bool) }}"
@@ -101,6 +102,10 @@
       ansible.builtin.command:
         cmd: "{{ verify_drush }} status --field=bootstrap"
         chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
       register: verify_bootstrap
       changed_when: false
       failed_when: "'Successful' not in verify_bootstrap.stdout"
@@ -111,6 +116,10 @@
       ansible.builtin.command:
         cmd: "{{ verify_drush }} core:requirements --format=json --severity=1"
         chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
       register: verify_requirements
       changed_when: false
       failed_when: false
@@ -144,6 +153,10 @@
       ansible.builtin.command:
         cmd: "{{ verify_drush }} php:eval \"print strlen(\\Drupal\\Core\\Site\\Settings::get('hash_salt'));\""
         chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
       register: verify_salt
       changed_when: false
       failed_when: (verify_salt.stdout | trim | int) < 32
@@ -169,6 +182,10 @@
       ansible.builtin.command:
         cmd: "{{ verify_drush }} php:eval \"print \\Drupal\\Core\\Site\\Settings::get('config_sync_directory');\""
         chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
       register: verify_config_sync
       changed_when: false
 
@@ -177,6 +194,85 @@
         path: "{{ verify_base_path }}/web/{{ verify_config_sync.stdout | trim }}"
       register: verify_config_sync_dir
       failed_when: not verify_config_sync_dir.stat.exists
+
+
+    #
+    # Cron
+    #
+
+    # Calling systemd_service with neither state nor enabled only reads status.
+    - name: Read the Drupal cron timer state
+      ansible.builtin.systemd_service:
+        name: drupal-cron.timer
+      register: verify_cron_timer
+      changed_when: false
+      when: verify_cron_enabled
+
+    - name: Assert the cron timer is active and has a next scheduled run
+      ansible.builtin.assert:
+        that:
+          - verify_cron_timer.status.ActiveState == 'active'
+          - verify_cron_timer.status.UnitFileState == 'enabled'
+          - verify_cron_timer.status.NextElapseUSecRealtime | default('') | length > 0
+        fail_msg: >-
+          drupal-cron.timer is not scheduled:
+          state={{ verify_cron_timer.status.ActiveState | default('?') }}
+          next={{ verify_cron_timer.status.NextElapseUSecRealtime | default('none') }}
+      when: verify_cron_enabled
+
+    - name: Read the Drupal cron service state
+      ansible.builtin.systemd_service:
+        name: drupal-cron.service
+      register: verify_cron_service
+      changed_when: false
+      when: verify_cron_enabled
+
+    # A timer that fires but whose service fails every time still looks
+    # "active", so check what actually happened on the last run.
+    - name: Assert the last cron run succeeded
+      ansible.builtin.assert:
+        that:
+          - verify_cron_service.status.Result in ['success', '']
+        fail_msg: "Last drupal-cron.service run result was {{ verify_cron_service.status.Result | default('?') }}."
+      when: verify_cron_enabled
+
+    - name: Assert Drupal recorded a recent cron run
+      ansible.builtin.command:
+        cmd: "{{ verify_drush }} state:get system.cron_last"
+        chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
+      register: verify_cron_last
+      changed_when: false
+      failed_when: >-
+        (verify_cron_last.stdout | trim | length) == 0
+        or ((ansible_date_time.epoch | int) - (verify_cron_last.stdout | trim | int)) > 86400
+      when: verify_cron_enabled
+
+    # Cron writing as root would leave files the web server cannot rewrite,
+    # which is why the unit runs as the web server account.
+    - name: Assert cron did not leave root-owned files in the files directory
+      ansible.builtin.command:
+        cmd: find {{ verify_base_path }}/web/sites/default/files -user root -print -quit
+      register: verify_cron_root_files
+      changed_when: false
+      failed_when: (verify_cron_root_files.stdout | trim) | length > 0
+      when: verify_cron_enabled
+
+    - name: Assert Drupal's request-triggered automated cron is disabled
+      ansible.builtin.command:
+        cmd: "{{ verify_drush }} config:get automated_cron.settings interval --format=string"
+        chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
+      register: verify_automated_cron
+      changed_when: false
+      failed_when: (verify_automated_cron.stdout | trim) not in ['0', '']
+      when: verify_cron_enabled
 
 
     #

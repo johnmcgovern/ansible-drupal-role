@@ -10,10 +10,24 @@
     name: nginx
     state: restarted
 
-# These two run in the order defined, and only when a Composer or Drush task
-# actually wrote to the tree. Doing the recursive chown unconditionally on every
-# play made the run permanently non-idempotent: it reset the writable
-# directories to root, and the fixup below flipped them back, every single time.
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+# NOTE: handlers run in the order they are defined here, not the order they are
+# notified. Cron is first so that anything it writes is covered by the ownership
+# handlers below. It runs as the web server account, as does the systemd timer,
+# because bootstrapping Drupal as root leaves a root-owned twig cache under
+# sites/default/files that the web server cannot then rewrite.
+- name: Run Drupal cron
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} cron"
+    chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
+  changed_when: true
+
 - name: Reset Drupal file ownership
   ansible.builtin.file:
     path: "{{ drupal_base_path }}"
@@ -32,12 +46,3 @@
   loop:
     - "{{ drupal_base_path }}/web/sites/default/files"
     - "{{ drupal_config_sync_path }}"
-
-# Cron is a maintenance action, not converged state, so running it every play
-# would make the run report changes forever. It only needs to run when the site
-# was just installed or a module was just enabled.
-- name: Run Drupal cron
-  ansible.builtin.command:
-    cmd: "{{ drupal_drush }} cron"
-    chdir: "{{ drupal_base_path }}"
-  changed_when: true

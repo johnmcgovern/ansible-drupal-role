@@ -1,0 +1,36 @@
+[Unit]
+# {{ ansible_managed }}
+Description=Drupal cron for {{ webserver_sitename }}
+Documentation=https://www.drupal.org/docs/administering-a-drupal-site/cron-automated-tasks
+After=network-online.target {{ db_service | default('mariadb') }}.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# Runs as the web server account, not root. Drupal's cron writes into
+# sites/default/files (twig cache, image derivatives, aggregated css/js); doing
+# that as root leaves files the web server cannot subsequently write.
+User={{ webserver_user }}
+Group={{ webserver_group }}
+
+WorkingDirectory={{ drupal_base_path }}
+
+# Drush wants somewhere writable for its own cache. www-data's home is not
+# guaranteed to exist and PrivateTmp gives this unit its own /tmp.
+Environment=HOME=/tmp
+
+ExecStart={{ drupal_drush }} cron --quiet
+
+TimeoutStartSec={{ drupal_cron_timeout }}
+
+# Cron only needs to read the codebase and write under the site's files
+# directory, so it does not need the rest of the filesystem writable.
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

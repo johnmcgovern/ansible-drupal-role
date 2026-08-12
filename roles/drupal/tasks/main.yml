@@ -25,3 +25,7 @@
 
 - name: Install and enable Drupal modules
   ansible.builtin.import_tasks: 05_install_modules.yml
+
+- name: Schedule Drupal cron
+  ansible.builtin.import_tasks: 06_cron.yml
+  when: drupal_cron_enabled

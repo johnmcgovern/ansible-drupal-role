@@ -33,6 +33,9 @@
   ansible.builtin.command:
     cmd: "{{ drupal_drush }} pm:list --status=enabled --format=json"
     chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
   register: drupal_enabled_modules
   changed_when: false
 
@@ -40,6 +43,9 @@
   ansible.builtin.command:
     cmd: "{{ drupal_drush }} pm:enable {{ item }} --yes"
     chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
   loop: "{{ drupal_enable_modules }}"
   when: item not in (drupal_enabled_modules.stdout | from_json)
   changed_when: true
