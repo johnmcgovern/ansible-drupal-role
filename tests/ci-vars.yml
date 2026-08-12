@@ -36,6 +36,13 @@ drupal_admin_password: ci-not-a-secret-admin-password
 drupal_email: ci@example.invalid
 drupal_sitename: CI Test Site
 
+# Set rather than allowlisted: this both clears the status report warning and
+# exercises the trusted_host_patterns branch of the settings.php template, which
+# would otherwise never be rendered in CI.
+drupal_trusted_host_patterns:
+  - '^localhost$'
+  - '^127\.0\.0\.1$'
+
 # Keep the module set small so the job stays fast; installing modules is already
 # covered by the tasks themselves.
 drupal_install_modules:
