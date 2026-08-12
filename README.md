@@ -398,6 +398,10 @@ warning, because Drupal checks GD regardless of the active toolkit.
   third-party repository in the base system's dependency graph, in exchange for a
   supported PHP. Note 8.3 has security support until December 2027, so this is not
   urgent.
+- **argon2id password hashing.** Drupal 12 will default to it and the status report
+  recommends switching now. `PASSWORD_ARGON2ID` is available in noble's PHP 8.3, so
+  this needs no PPA — only the right Drupal configuration, plus confirming existing
+  bcrypt hashes still validate and are rehashed on next login.
 - Apache TLS vhost is implemented but has only been tested with nginx
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.
