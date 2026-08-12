@@ -35,6 +35,7 @@
     verify_cron_enabled: "{{ drupal_cron_enabled | default(true) | bool }}"
     verify_backup_enabled: "{{ drupal_backup_enabled | default(true) | bool }}"
     verify_backup_path: "{{ drupal_backup_path | default('/var/backups/drupal') }}"
+    verify_password_algorithm: "{{ drupal_password_algorithm | default('argon2id') }}"
     # Live ACME dry-run renewal: slow, rate limited and intermittently flaky.
     # Enable with -e verify_check_renewal=true when you want it.
     verify_check_renewal: false
@@ -199,6 +200,78 @@
         path: "{{ verify_base_path }}/web/{{ verify_config_sync.stdout | trim }}"
       register: verify_config_sync_dir
       failed_when: not verify_config_sync_dir.stat.exists
+
+
+    #
+    # Password hashing
+    #
+
+    # Reads the algorithm the container actually built with, hashes a sample to
+    # confirm the prefix, and checks a bcrypt hash still validates. Drupal
+    # silently falls back to the PHP default when password.algorithm is not a
+    # value from password_algos(), so asserting on configuration alone would
+    # pass while the site kept using bcrypt.
+    - name: Inspect the password hashing service
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_drush }} php:eval
+          "$p = \Drupal::service('password');
+           $r = new ReflectionClass($p);
+           $a = $r->getProperty('algorithm'); $a->setAccessible(TRUE);
+           $legacy = password_hash('probe', PASSWORD_BCRYPT);
+           print json_encode([
+             'algorithm' => $a->getValue($p),
+             'sample' => substr($p->hash('probe'), 0, 10),
+             'bcrypt_still_valid' => $p->check('probe', $legacy),
+             'bcrypt_needs_rehash' => $p->needsRehash($legacy),
+           ]);"
+        chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
+      register: verify_password
+      changed_when: false
+
+    - name: Assert the configured hashing algorithm is actually in use
+      ansible.builtin.assert:
+        that:
+          - (verify_password.stdout | from_json).algorithm == verify_password_algorithm
+          - (verify_password.stdout | from_json).sample.startswith('$' ~ verify_password_algorithm ~ '$')
+        fail_msg: >-
+          Expected {{ verify_password_algorithm }} but the password service reports
+          algorithm={{ (verify_password.stdout | from_json).algorithm | default('null') }}
+          producing hashes like {{ (verify_password.stdout | from_json).sample | default('?') }}.
+          An unrecognised password.algorithm silently degrades to the PHP default.
+      when: verify_password_algorithm | length > 0
+
+    # Switching algorithms must not lock out existing users. password_verify()
+    # reads the algorithm from the hash, so old bcrypt hashes keep working and
+    # Drupal rehashes them on the user's next successful login.
+    - name: Assert existing bcrypt hashes still validate and are marked for rehash
+      ansible.builtin.assert:
+        that:
+          - (verify_password.stdout | from_json).bcrypt_still_valid
+          - (verify_password.stdout | from_json).bcrypt_needs_rehash
+        fail_msg: >-
+          Pre-existing bcrypt hashes do not behave correctly under the new
+          algorithm: valid={{ (verify_password.stdout | from_json).bcrypt_still_valid }}
+          needs_rehash={{ (verify_password.stdout | from_json).bcrypt_needs_rehash }}
+      when: verify_password_algorithm | length > 0
+
+    - name: Assert services.yml is loaded by the container
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_drush }} php:eval
+          "print implode(',', \Drupal\Core\Site\Settings::get('container_yamls', []));"
+        chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
+      register: verify_container_yamls
+      changed_when: false
+      failed_when: "'sites/default/services.yml' not in verify_container_yamls.stdout"
 
 
     #

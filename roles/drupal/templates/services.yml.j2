@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+#
+# Managed by Ansible. Local edits will be overwritten on the next playbook run.
+# Loaded because settings.php registers it in $settings['container_yamls'].
+
+parameters:
+  # Password hashing. Drupal's default is PHP's PASSWORD_DEFAULT, which is
+  # bcrypt; Drupal 12 will default to argon2id and the status report recommends
+  # switching now.
+  #
+  # This must be an identifier returned by PHP's password_algos() -- "argon2id",
+  # not "PASSWORD_ARGON2ID". Drupal's PhpPassword checks the value against
+  # password_algos() and silently falls back to the PHP default if it does not
+  # match, so a typo here degrades to bcrypt with no error anywhere. The verify
+  # playbook asserts the algorithm actually in use for that reason.
+{% if drupal_password_algorithm %}
+  password.algorithm: '{{ drupal_password_algorithm }}'
+{% else %}
+  password.algorithm: ~
+{% endif %}
+
+  # Options passed to password_hash(). Empty means PHP's defaults, which for
+  # argon2id are 64 MiB memory, 4 iterations, 1 thread.
+  password.options: {{ drupal_password_options | to_json }}

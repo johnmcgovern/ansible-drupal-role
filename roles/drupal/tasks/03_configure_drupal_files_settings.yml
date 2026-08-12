@@ -37,6 +37,19 @@
     group: "{{ webserver_group }}"
     mode: "0440"
   no_log: true
+  notify: Rebuild Drupal cache
+
+# Container parameters, currently the password hashing algorithm. Changing this
+# alters the compiled service container, so the cache has to be rebuilt before
+# it takes effect -- hence the handler.
+- name: Write Drupal services.yml
+  ansible.builtin.template:
+    src: services.yml.j2
+    dest: "{{ drupal_base_path }}/web/sites/default/services.yml"
+    owner: root
+    group: "{{ webserver_group }}"
+    mode: "0440"
+  notify: Rebuild Drupal cache
 
 - name: Lock down sites/default
   ansible.builtin.file:

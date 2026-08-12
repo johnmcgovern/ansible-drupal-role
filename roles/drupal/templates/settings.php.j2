@@ -26,6 +26,11 @@ $settings['enable_html5_validation'] = {{ 'TRUE' if drupal_enable_html5_validati
 
 $settings['config_sync_directory'] = '{{ drupal_config_sync_relative }}';
 
+// Core's default.settings.php registers this; without it Drupal never reads
+// sites/default/services.yml and any service or parameter override there is
+// silently ignored.
+$settings['container_yamls'][] = $app_root . '/' . $site_path . '/services.yml';
+
 $databases['default']['default'] = [
   'database' => '{{ db_name }}',
   'username' => '{{ db_user }}',

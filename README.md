@@ -298,6 +298,39 @@ This path is tested, not assumed: a canary node and file were created, backed up
 the database was dropped and the files directory deleted, and both came back.
 
 
+### Password hashing
+
+Drupal hashes with PHP's `PASSWORD_DEFAULT` (bcrypt) unless told otherwise. Drupal 12
+will default to argon2id and the status report recommends switching now, so these roles
+configure it:
+
+```yaml
+drupal_password_algorithm: argon2id   # "" leaves PHP's default in place
+drupal_password_options: {}           # PHP defaults: 64 MiB, 4 iterations, 1 thread
+```
+
+`PASSWORD_ARGON2ID` is available in Ubuntu 24.04's PHP 8.3, so this needs no third-party
+packages.
+
+**Existing users are not locked out.** `password_verify()` reads the algorithm from the
+hash itself, so bcrypt hashes keep validating; Drupal marks them as needing a rehash and
+replaces them with argon2id on each user's next successful login. Both behaviours are
+asserted in `tests/verify.yml`.
+
+The value must be an identifier from PHP's `password_algos()` — `argon2id`, **not**
+`PASSWORD_ARGON2ID`. Drupal checks it against that list and *silently falls back to the
+PHP default* when it does not match, so a typo downgrades the site to bcrypt with no
+error anywhere. `tests/verify.yml` therefore asserts the algorithm the container
+actually built with and the prefix of a freshly generated hash, rather than trusting the
+configuration file. That check is verified to fail when the value is wrong.
+
+This is delivered through `sites/default/services.yml`, which is only read because
+`settings.php` registers it in `$settings['container_yamls']` — core's
+`default.settings.php` does this and the template here previously did not, so any
+service or parameter override was silently ignored. Changing either file rebuilds the
+Drupal cache, since both feed the compiled service container.
+
+
 ### Drupal status report
 
 The goal is a clean status report out of the box. Three items that Drupal warns about
@@ -392,16 +425,6 @@ warning, because Drupal checks GD regardless of the active toolkit.
 
 ### ToDo
 
-- **PHP 8.4.** Drupal's status report recommends 8.4 or newer for ongoing support.
-  Noble ships 8.3 only, so this needs `ppa:ondrej/php`. Unlike the AVIF case that PPA
-  genuinely does provide 8.4, so the tradeoff is real rather than pointless: a
-  third-party repository in the base system's dependency graph, in exchange for a
-  supported PHP. Note 8.3 has security support until December 2027, so this is not
-  urgent.
-- **argon2id password hashing.** Drupal 12 will default to it and the status report
-  recommends switching now. `PASSWORD_ARGON2ID` is available in noble's PHP 8.3, so
-  this needs no PPA — only the right Drupal configuration, plus confirming existing
-  bcrypt hashes still validate and are rehashed on next login.
 - Apache TLS vhost is implemented but has only been tested with nginx
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.

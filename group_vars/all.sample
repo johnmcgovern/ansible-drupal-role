@@ -151,6 +151,14 @@ drupal_admin_password: CHANGEME   # SECRET
 # browser-side HTML5 form validation enabled.
 drupal_enable_html5_validation: false
 
+# Password hashing. Drupal 12 will default to argon2id; this switches now.
+# Must be an identifier from PHP's password_algos() -- "argon2id", not
+# "PASSWORD_ARGON2ID". An unrecognised value silently falls back to bcrypt.
+# Existing bcrypt hashes keep working and are rehashed on next login.
+# Set to "" to leave PHP's default (bcrypt) in place.
+drupal_password_algorithm: argon2id
+drupal_password_options: {}
+
 # Host header protection. Leave as an empty list to disable. When set, requests
 # whose Host header matches none of these regular expressions are rejected, so
 # an incorrect value makes the site unreachable -- set it once the hostname is

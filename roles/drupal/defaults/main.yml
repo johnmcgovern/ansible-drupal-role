@@ -95,6 +95,25 @@ drupal_backup_files_exclude:
 # Take one backup during deployment to prove the path works.
 drupal_backup_run_on_deploy: true
 
+#
+# Password hashing
+#
+# Drupal's default is PHP's PASSWORD_DEFAULT (bcrypt); Drupal 12 will default to
+# argon2id and the status report recommends switching now. Existing bcrypt
+# hashes keep working -- password_verify() reads the algorithm from the hash
+# itself -- and Drupal rehashes each user's password on their next login.
+#
+# Must be an identifier from PHP's password_algos(), so "argon2id", not
+# "PASSWORD_ARGON2ID". An unrecognised value silently falls back to the PHP
+# default, which is why tests/verify.yml asserts the algorithm actually in use.
+# Set to an empty string to leave PHP's default in place.
+drupal_password_algorithm: argon2id
+
+# Options for password_hash(). Empty uses PHP's defaults, which for argon2id are
+# 64 MiB memory, 4 iterations and 1 thread. Raising memory_cost strengthens the
+# hash but costs RAM per concurrent login.
+drupal_password_options: {}
+
 drupal_install_modules: []
 drupal_enable_modules: []
 

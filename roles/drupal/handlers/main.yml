@@ -14,6 +14,20 @@
   ansible.builtin.systemd_service:
     daemon_reload: true
 
+# settings.php and services.yml feed the compiled service container, so a change
+# to either only takes effect once the container is rebuilt. Skipped when Drupal
+# is not installed yet: on a first run the site does not exist until later in
+# the play, and site:install builds the container itself.
+- name: Rebuild Drupal cache
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} cache:rebuild"
+    chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
+  changed_when: true
+  when: "'Successful' in (drupal_bootstrap.stdout | default(''))"
+
 # NOTE: handlers run in the order they are defined here, not the order they are
 # notified. Cron is first so that anything it writes is covered by the ownership
 # handlers below. It runs as the web server account, as does the systemd timer,
