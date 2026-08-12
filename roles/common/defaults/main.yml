@@ -1,6 +1,6 @@
 ---
-# Web server run-as identity. On Ubuntu both nginx and apache2 run as www-data,
-# and the packages create this user/group themselves.
+# Web server run-as identity. Ubuntu's nginx package runs as www-data and
+# creates this user/group itself.
 webserver_user: www-data
 webserver_group: www-data
 

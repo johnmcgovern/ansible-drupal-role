@@ -42,7 +42,7 @@
   when: webserver_tls_challenge == 'dns-01'
   no_log: true
 
-# --webroot rather than the --nginx/--apache plugins on purpose: those rewrite
+# --webroot rather than certbot's --nginx plugin on purpose: that plugin rewrites
 # the vhost in place, which would fight the template that Ansible manages.
 # With --webroot certbot only ever writes challenge files and certificates.
 - name: Obtain the Let's Encrypt certificate
@@ -81,9 +81,7 @@
   ansible.builtin.command:
     cmd: nginx -t
   changed_when: false
-  when:
-    - webserver_type == 'nginx'
-    - webserver_tls_active
+  when: webserver_tls_active
 
 # The certbot package ships a systemd timer that renews automatically, but it
 # has no way to know the web server needs reloading to pick up the new
@@ -97,7 +95,7 @@
     content: |
       #!/bin/sh
       # Managed by Ansible. Local edits will be overwritten.
-      systemctl reload {{ 'nginx' if webserver_type == 'nginx' else 'apache2' }}
+      systemctl reload nginx
   when: webserver_tls_active
 
 - name: Ensure the certbot renewal timer is enabled

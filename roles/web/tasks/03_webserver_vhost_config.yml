@@ -30,43 +30,10 @@
     group: "{{ webserver_group }}"
     mode: "0755"
 
-
-#
-# Apache
-#
-
-- name: Disable the Apache2 default vhost
-  ansible.builtin.file:
-    path: /etc/apache2/sites-enabled/000-default.conf
-    state: absent
-  when: webserver_type == 'apache'
-  notify: Restart apache2
-
-- name: Enable the Drupal Apache2 vhost
-  ansible.builtin.file:
-    src: /etc/apache2/sites-available/01-drupal.conf
-    dest: /etc/apache2/sites-enabled/01-drupal.conf
-    state: link
-  when: webserver_type == 'apache'
-  notify: Restart apache2
-
-- name: Ensure Apache2 is running and enabled
-  ansible.builtin.service:
-    name: apache2
-    state: started
-    enabled: true
-  when: webserver_type == 'apache'
-
-
-#
-# Nginx
-#
-
 - name: Disable the Nginx default site
   ansible.builtin.file:
     path: /etc/nginx/sites-enabled/default
     state: absent
-  when: webserver_type == 'nginx'
   notify: Restart nginx
 
 - name: Enable the Drupal Nginx site
@@ -74,7 +41,6 @@
     src: /etc/nginx/sites-available/drupal
     dest: /etc/nginx/sites-enabled/drupal
     state: link
-  when: webserver_type == 'nginx'
   notify: Restart nginx
 
 # Runs after the symlink is in place so it tests the configuration nginx will
@@ -83,14 +49,12 @@
   ansible.builtin.command:
     cmd: nginx -t
   changed_when: false
-  when: webserver_type == 'nginx'
 
 - name: Ensure Nginx is running and enabled
   ansible.builtin.service:
     name: nginx
     state: started
     enabled: true
-  when: webserver_type == 'nginx'
 
 # The ACME HTTP-01 challenge is answered on port 80 by the vhost just written,
 # so the web server has to be reloaded before certbot runs.

@@ -9,7 +9,7 @@
 
 - name: Check whether PHP is pointed at a custom GD build
   ansible.builtin.stat:
-    path: "/etc/php/{{ php_version }}/{{ (webserver_type == 'nginx') | ternary('fpm', 'apache2') }}/conf.d/20-gd.ini"
+    path: "/etc/php/{{ php_version }}/fpm/conf.d/20-gd.ini"
   register: gd_ini_state
   when: not php_gd_avif_build
 
@@ -22,7 +22,9 @@
     dest: "/etc/php/{{ php_version }}/{{ item }}/conf.d/20-gd.ini"
     state: link
     force: true
-  loop: "{{ ['cli', 'fpm'] if webserver_type == 'nginx' else ['cli', 'apache2'] }}"
+  loop:
+    - cli
+    - fpm
   when:
     - not php_gd_avif_build
     - gd_ini_state.stat.exists | default(false)
@@ -162,7 +164,9 @@
           ; Replaces the distribution gd module with an AVIF-capable build.
           ; priority=20
           extension={{ php_gd_avif_prefix }}/lib/php/gd.so
-      loop: "{{ ['cli', 'fpm'] if webserver_type == 'nginx' else ['cli', 'apache2'] }}"
+      loop:
+        - cli
+        - fpm
       notify: Restart php-fpm
 
     - name: Apply the pending PHP-FPM restart

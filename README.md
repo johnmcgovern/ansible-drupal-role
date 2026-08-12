@@ -6,7 +6,7 @@
 Ansible roles that install a default Drupal instance (latest stable release) with all
 required configuration and dependencies. At a high level this installs:
 
-- nginx (default) or apache2
+- nginx
 - PHP 8.3 + PHP-FPM
 - MariaDB
 - Composer
@@ -21,7 +21,13 @@ The goal is a base Drupal install with no errors on the status report.
 
 **Ubuntu 24.04 LTS (noble) only.**
 
-The `common` role asserts this and fails immediately on anything else. Ubuntu 24.04
+**nginx and MariaDB only.** Apache support was removed — it was never tested, and every
+feature (TLS, PHP tuning, the GD build) had to carry a second untested code path. Anyone
+still setting `webserver_type` gets an explicit error rather than a silent substitution.
+The database is MariaDB; the roles assert the running server reports `MariaDB` and that
+no MySQL or Percona packages are installed.
+
+The `common` role asserts the OS and fails immediately on anything else. Ubuntu 24.04
 ships PHP 8.3 and MariaDB 10.11, which satisfy the requirements of current Drupal
 releases. Earlier Ubuntu releases are no longer supported — support for 18.04/20.04
 was removed along with the workarounds those releases needed.
@@ -101,8 +107,8 @@ Two validation methods are supported via `webserver_tls_challenge`:
 
 - **`http-01`** (default) — certbot answers a challenge on port 80. Requires the host
   to be reachable from the internet. Uses `--webroot` against a dedicated ACME
-  directory rather than certbot's nginx/apache plugins, so certbot never rewrites the
-  vhost that Ansible manages.
+  directory rather than certbot's nginx plugin, so certbot never rewrites the vhost
+  that Ansible manages.
 - **`dns-01`** — proves control by writing a TXT record through the Cloudflare API.
   Use this when the server is internal, firewalled, or resolves to a private address,
   since it needs no inbound connectivity at all. Requires a Cloudflare API token
@@ -405,10 +411,9 @@ warning, because Drupal checks GD regardless of the active toolkit.
 
 ### Notes
 
-- `webserver_type` selects `nginx` (default) or `apache`.
 - The bare `php` metapackage is deliberately not installed. It depends on `php8.3`,
-  whose first dependency alternative is `libapache2-mod-php8.3`, so apt pulls in
-  apache2 as a side effect — which then binds port 80 and prevents nginx from starting.
+  whose first dependency alternative is `libapache2-mod-php8.3`, so apt would pull in
+  Apache as a side effect — which then binds port 80 and prevents nginx from starting.
   `php-cli` provides the same interpreter with no web server attached.
 - `drupal_trusted_host_patterns` is an empty list by default, which disables Drupal's
   host header protection and leaves one warning on the status report. Set it to a list
@@ -425,7 +430,6 @@ warning, because Drupal checks GD regardless of the active toolkit.
 
 ### ToDo
 
-- Apache TLS vhost is implemented but has only been tested with nginx
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.
   The DB user is still granted from `localhost` only.

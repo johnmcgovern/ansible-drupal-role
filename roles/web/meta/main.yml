@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: web
   author: John McGovern
-  description: Installs and configures nginx or apache2 with PHP for serving Drupal.
+  description: Installs and configures nginx with PHP-FPM for serving Drupal.
   license: MIT
   min_ansible_version: "2.15"
   platforms:
@@ -12,7 +12,6 @@ galaxy_info:
   galaxy_tags:
     - drupal
     - nginx
-    - apache
     - php
 
 dependencies: []

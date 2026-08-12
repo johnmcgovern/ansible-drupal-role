@@ -25,7 +25,7 @@
     name: "{{ common_packages }}"
     state: present
 
-# The nginx/apache2 packages create www-data themselves. We only assert it is
+# The nginx package creates www-data itself. We only assert it is
 # present rather than creating it, because rewriting an existing system user's
 # home directory or shell is invasive and is not needed by anything here.
 - name: Look up the web server account

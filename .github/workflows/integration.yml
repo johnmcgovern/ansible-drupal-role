@@ -43,6 +43,7 @@ jobs:
 
       # The runner image ships MySQL, which conflicts with mariadb-server, and
       # may ship Apache, which would hold port 80 before nginx can bind it.
+      # Neither is installed by these roles; this is purely about the image.
       - name: Remove conflicting preinstalled services
         run: |
           sudo systemctl stop mysql apache2 2>/dev/null || true

@@ -16,7 +16,6 @@
   vars:
     verify_base_path: "{{ drupal_base_path | default('/var/www/drupal') }}"
     verify_drush: "{{ verify_base_path }}/vendor/bin/drush"
-    verify_webserver_type: "{{ webserver_type | default('nginx') }}"
     verify_webserver_user: "{{ webserver_user | default('www-data') }}"
     verify_sitename: "{{ webserver_sitename | default('127.0.0.1') }}"
     verify_max_body_size: "{{ webserver_max_body_size | default('64M') }}"
@@ -56,15 +55,53 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.services[webserver_service].state == 'running'
-        fail_msg: "{{ webserver_service }} is not running."
+        fail_msg: "nginx is not running."
       vars:
-        webserver_service: "{{ 'nginx.service' if verify_webserver_type == 'nginx' else 'apache2.service' }}"
+        webserver_service: nginx.service
 
     - name: Assert MariaDB is running
       ansible.builtin.assert:
         that:
           - ansible_facts.services['mariadb.service'].state == 'running'
         fail_msg: "mariadb is not running."
+
+    - name: Read the database server version
+      ansible.builtin.command:
+        cmd: mariadb --skip-column-names --batch --execute "SELECT VERSION();"
+      register: verify_db_version
+      changed_when: false
+
+    - name: Assert the database server is MariaDB
+      ansible.builtin.assert:
+        that:
+          - "'MariaDB' in verify_db_version.stdout"
+        fail_msg: >-
+          Expected MariaDB, got "{{ verify_db_version.stdout | trim }}".
+        success_msg: "Database server is {{ verify_db_version.stdout | trim }}."
+
+    # Guards against a MySQL or Percona package arriving as a dependency of
+    # something else. mysql-common is excluded: it is a hard dependency of
+    # mariadb-common and only provides the shared /etc/mysql/my.cnf shim.
+    - name: List installed packages from other MySQL variants
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          dpkg-query -W -f='${Package} ${Status}\n' 2>/dev/null
+          | awk '$NF == "installed" { print $1 }'
+          | grep -E '^(mysql-server|mysql-client|mysql-community|percona-)|^libmysqlclient'
+          | grep -vx 'mysql-common' || true
+        executable: /bin/bash
+      register: verify_mysql_variants
+      changed_when: false
+
+    - name: Assert no MySQL or Percona packages are installed
+      ansible.builtin.assert:
+        that:
+          - (verify_mysql_variants.stdout | trim) == ''
+        fail_msg: >-
+          Packages from another MySQL variant are installed:
+          {{ verify_mysql_variants.stdout_lines | join(', ') }}.
+          This stack is MariaDB only.
 
     - name: Detect the PHP-FPM service
       ansible.builtin.command:
@@ -79,14 +116,12 @@
         fail_msg: "{{ fpm_service }} is not running."
       vars:
         fpm_service: "php{{ verify_php_version.stdout | trim }}-fpm.service"
-      when: verify_webserver_type == 'nginx'
 
     - name: Assert the PHP-FPM socket exists
       ansible.builtin.stat:
         path: "/run/php/php{{ verify_php_version.stdout | trim }}-fpm.sock"
       register: verify_socket
       failed_when: not verify_socket.stat.exists
-      when: verify_webserver_type == 'nginx'
 
     - name: Request the site front page
       ansible.builtin.uri:
@@ -461,7 +496,6 @@
         cmd: "php-fpm{{ verify_php_version.stdout | trim }} -i"
       register: verify_php_ini
       changed_when: false
-      when: verify_webserver_type == 'nginx'
 
     # php -i prints "key => local_value => master_value". Lines that do not
     # match that shape (section headers, multi-line values) yield None from
@@ -473,7 +507,6 @@
                   | map('regex_search', '^([a-z_][a-z0-9_.]*) => (.*?) => (.*)$', '\1', '\2')
                   | select('ne', None)
                   | list) }}
-      when: verify_webserver_type == 'nginx'
 
     - name: Assert the PHP tuning is in effect for the FPM SAPI
       ansible.builtin.assert:
@@ -488,14 +521,12 @@
           memory_limit={{ verify_php['memory_limit'] | default('?') }}
           max_execution_time={{ verify_php['max_execution_time'] | default('?') }}
           opcache={{ verify_php['opcache.enable'] | default('?') }}
-      when: verify_webserver_type == 'nginx'
 
     - name: Assert APCu is available to the FPM SAPI
       ansible.builtin.assert:
         that:
           - "'apcu' in verify_php_ini.stdout"
         fail_msg: "APCu is not loaded in PHP-FPM; Drupal's status report will flag the cache backend."
-      when: verify_webserver_type == 'nginx'
 
     - name: Assert GD reports AVIF when the custom build is enabled
       ansible.builtin.assert:
@@ -540,7 +571,6 @@
           upload_max_filesize ({{ verify_php['upload_max_filesize'] }}) does not
           match the web server body limit ({{ verify_max_body_size }}), which
           produces confusing 413s at the boundary.
-      when: verify_webserver_type == 'nginx'
 
 
     #

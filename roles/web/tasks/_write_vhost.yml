@@ -1,17 +1,7 @@
 ---
-# Shared by 02_webserver_vhost_config.yml and 03_tls.yml. The vhost is written
+# Shared by 03_webserver_vhost_config.yml and 04_tls.yml. The vhost is written
 # once before the certificate exists (HTTP only, serving ACME challenges) and
 # again afterwards with the TLS block enabled, so this lives in one place.
-
-- name: Write Apache2 vhost conf file
-  ansible.builtin.template:
-    src: apache-01-drupal.conf.j2
-    dest: /etc/apache2/sites-available/01-drupal.conf
-    owner: root
-    group: root
-    mode: "0644"
-  when: webserver_type == 'apache'
-  notify: Restart apache2
 
 - name: Write Nginx conf file
   ansible.builtin.template:
@@ -20,5 +10,4 @@
     owner: root
     group: root
     mode: "0644"
-  when: webserver_type == 'nginx'
   notify: Restart nginx

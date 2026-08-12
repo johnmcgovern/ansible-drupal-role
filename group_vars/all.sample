@@ -15,8 +15,6 @@ ansible_user: username
 # Web server
 #
 
-webserver_type: nginx   # nginx (default) or apache
-
 webserver_sitename: mysite.example.com
 webserver_email: example@example.com
 
@@ -43,8 +41,8 @@ webserver_tls_challenge: http-01
 # (production allows only 5 duplicate certificates per week).
 webserver_tls_staging: false
 
-# The account the web server runs as. Ubuntu's nginx and apache2 packages both
-# use www-data; there is rarely a reason to change this.
+# The account the web server runs as. Ubuntu's nginx package uses www-data;
+# there is rarely a reason to change this.
 webserver_user: www-data
 webserver_group: www-data
 

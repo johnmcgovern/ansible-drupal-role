@@ -1,7 +1,4 @@
 ---
-# nginx (default) or apache
-webserver_type: nginx
-
 # Mirrors roles/common/defaults. Role defaults do not carry across plays.
 webserver_user: www-data
 webserver_group: www-data
@@ -52,15 +49,6 @@ webserver_tls_hsts_max_age: 31536000   # 1 year
 webserver_acme_webroot: /var/www/letsencrypt
 webserver_tls_cert_dir: "/etc/letsencrypt/live/{{ webserver_sitename }}"
 
-# PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache.
-# php-uploadprogress ships in the noble universe component, so no third-party
-# PPA is required on 24.04.
-#
-# NOTE: the bare `php` metapackage is deliberately NOT listed. It depends on
-# php8.3, whose first Depends alternative is libapache2-mod-php8.3, so apt
-# installs apache2 as a side effect -- which then binds port 80 and stops nginx
-# from starting. php-cli gives the same interpreter without the web server.
-#
 # PHP tuning
 #
 # Applied as a conf.d drop-in, so the packaged php.ini is never edited.
@@ -144,6 +132,14 @@ php_gd_avif_apt_suites:
   - noble-updates
   - noble-security
 
+# PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache.
+# php-uploadprogress ships in the noble universe component, so no third-party
+# PPA is required on 24.04.
+#
+# NOTE: the bare `php` metapackage is deliberately NOT listed. It depends on
+# php8.3, whose first Depends alternative is libapache2-mod-php8.3, so apt would
+# install Apache as a side effect -- which then binds port 80 and stops nginx
+# from starting. php-cli gives the same interpreter without any web server.
 php_packages:
   - php-apcu
   - php-cli

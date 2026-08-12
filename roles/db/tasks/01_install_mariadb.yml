@@ -1,11 +1,18 @@
 ---
 
+# install_recommends is off deliberately. mariadb-client Recommends
+# libdbd-mysql-perl, which Depends on libmysqlclient21 -- Oracle MySQL 8.0's
+# client library -- pulling a MySQL component onto a MariaDB-only host. Those
+# Perl modules only serve helper scripts (mysqlhotcopy and friends) that nothing
+# here uses. mysql-common still arrives as a hard dependency of mariadb-common,
+# but it is only the shared /etc/mysql/my.cnf shim, not a MySQL server or client.
 - name: Install MariaDB server and client
   ansible.builtin.apt:
     name:
       - mariadb-server
       - mariadb-client
     state: present
+    install_recommends: false
 
 # Ubuntu 24.04 marks the system Python as externally managed (PEP 668), so
 # `pip install PyMySQL` is refused. The distro package is the supported route.
@@ -32,6 +39,26 @@
     name: "{{ db_service }}"
     state: started
     enabled: true
+
+# The mysql/mysqldump commands used by the backup and restore scripts are
+# MariaDB's compatibility symlinks, and the roles are only tested against
+# MariaDB. If an Oracle MySQL or Percona server were somehow serving this host,
+# the socket path, authentication plugin and dump behaviour would all differ, so
+# fail loudly rather than operating on assumptions that no longer hold.
+- name: Confirm the running database server is MariaDB
+  ansible.builtin.command:
+    cmd: mariadb --skip-column-names --batch --execute "SELECT VERSION();"
+  register: db_server_version
+  changed_when: false
+
+- name: Assert the server is MariaDB and not another MySQL variant
+  ansible.builtin.assert:
+    that:
+      - "'MariaDB' in db_server_version.stdout"
+    fail_msg: >-
+      Expected MariaDB but the server reports "{{ db_server_version.stdout | trim }}".
+      These roles support MariaDB only.
+    success_msg: "Database server is {{ db_server_version.stdout | trim }}."
 
 # The isolation level has to be in effect before Drupal connects, and the
 # handler would otherwise not run until the end of the play.

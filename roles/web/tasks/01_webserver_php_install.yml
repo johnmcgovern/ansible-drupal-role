@@ -1,10 +1,15 @@
 ---
 
-- name: Assert a supported web server was selected
+# Apache support was removed. This gives anyone carrying webserver_type in their
+# group_vars a clear message instead of silently deploying something other than
+# what they asked for.
+- name: Fail if a removed web server is requested
   ansible.builtin.assert:
     that:
-      - webserver_type in ['nginx', 'apache']
-    fail_msg: "webserver_type must be 'nginx' or 'apache', got '{{ webserver_type }}'."
+      - webserver_type | default('nginx') == 'nginx'
+    fail_msg: >-
+      Apache support has been removed; these roles install nginx only.
+      Remove webserver_type from your variables, or set it to 'nginx'.
 
 - name: Install PHP and PHP modules
   ansible.builtin.apt:
@@ -26,12 +31,12 @@
     php_fpm_service: "php{{ php_version_result.stdout | trim }}-fpm"
     php_fpm_socket: "/run/php/php{{ php_version_result.stdout | trim }}-fpm.sock"
 
-# Belt and braces against the apache2-via-php-metapackage trap, and against
-# switching webserver_type on an already-provisioned host: whichever server we
-# are not using must not be holding port 80 when the other tries to bind.
-- name: Stop and disable the unselected web server if it is installed
+# Nothing here installs Apache, but a host may already have it from an earlier
+# deployment or a preinstalled image. It would hold port 80 and stop nginx from
+# starting, so it is shut down if present.
+- name: Stop and disable Apache if it is installed
   ansible.builtin.service:
-    name: "{{ 'apache2' if webserver_type == 'nginx' else 'nginx' }}"
+    name: apache2
     state: stopped
     enabled: false
   failed_when: false
@@ -42,22 +47,6 @@
       - nginx
       - "php{{ php_version }}-fpm"
     state: present
-  when: webserver_type == 'nginx'
-
-- name: Install Apache2 and mod_php
-  ansible.builtin.apt:
-    name:
-      - apache2
-      - "libapache2-mod-php{{ php_version }}"
-    state: present
-  when: webserver_type == 'apache'
-
-- name: Enable the Apache rewrite module
-  community.general.apache2_module:
-    name: rewrite
-    state: present
-  when: webserver_type == 'apache'
-  notify: Restart apache2
 
 # nginx 1.25.1 replaced the `http2` parameter of the listen directive with a
 # standalone `http2 on;`. Noble ships 1.24, so the vhost has to emit whichever
@@ -67,31 +56,25 @@
     cmd: nginx -v
   register: nginx_version_result
   changed_when: false
-  when: webserver_type == 'nginx'
 
 - name: Register the Nginx version
   ansible.builtin.set_fact:
     webserver_nginx_version: "{{ nginx_version_result.stderr | regex_search('nginx/([0-9.]+)', '\\1') | first }}"
-  when: webserver_type == 'nginx'
 
 - name: Ensure PHP-FPM is running and enabled
   ansible.builtin.service:
     name: "{{ php_fpm_service }}"
     state: started
     enabled: true
-  when: webserver_type == 'nginx'
 
 - name: Confirm the PHP-FPM socket exists at the expected path
   ansible.builtin.stat:
     path: "{{ php_fpm_socket }}"
   register: php_fpm_socket_stat
-  when: webserver_type == 'nginx'
 
 - name: Fail early if the PHP-FPM socket is missing
   ansible.builtin.fail:
     msg: >-
       Expected PHP-FPM socket at {{ php_fpm_socket }} but it does not exist.
       The nginx vhost would return 502 for every request.
-  when:
-    - webserver_type == 'nginx'
-    - not php_fpm_socket_stat.stat.exists
+  when: not php_fpm_socket_stat.stat.exists
