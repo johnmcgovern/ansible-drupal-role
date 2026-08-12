@@ -66,6 +66,35 @@ drupal_cron_timeout: 600
 # at the first scheduled run.
 drupal_cron_run_on_deploy: true
 
+#
+# Backups
+#
+# A systemd timer dumps the database and archives the files directory. The dump
+# goes through MariaDB's unix_socket authentication as root, so no database
+# password is written to disk, and the backup directory is root-only.
+drupal_backup_enabled: true
+
+drupal_backup_path: /var/backups/drupal
+drupal_backup_on_calendar: daily
+drupal_backup_randomized_delay: 1800
+drupal_backup_retention_days: 14
+drupal_backup_timeout: 3600
+
+# Dump the schema of cache tables but not their contents. They are regenerated
+# on demand and on a busy site can be larger than the real data.
+drupal_backup_exclude_cache: true
+
+# Regenerated automatically, so not worth the archive space. Image derivatives
+# under styles/ are deliberately NOT excluded: they are also regenerable, but
+# rebuilding them all at once after a restore is expensive.
+drupal_backup_files_exclude:
+  - php
+  - css
+  - js
+
+# Take one backup during deployment to prove the path works.
+drupal_backup_run_on_deploy: true
+
 drupal_install_modules: []
 drupal_enable_modules: []
 

@@ -135,6 +135,14 @@ drupal_region: en
 drupal_cron_enabled: true
 drupal_cron_on_calendar: hourly
 
+# Backups. A systemd timer dumps the database (via MariaDB socket auth, so no
+# password is stored) and archives the files directory into a root-only
+# directory. Restore with /usr/local/sbin/drupal-restore.sh --list.
+drupal_backup_enabled: true
+drupal_backup_path: /var/backups/drupal
+drupal_backup_on_calendar: daily
+drupal_backup_retention_days: 14
+
 drupal_admin: admin
 drupal_admin_password: CHANGEME   # SECRET
 

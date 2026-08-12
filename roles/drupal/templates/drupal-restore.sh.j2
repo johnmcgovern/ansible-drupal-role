@@ -1,0 +1,100 @@
+#!/bin/bash
+# {{ ansible_managed }}
+#
+# Restores a Drupal backup produced by drupal-backup.sh.
+#
+#   drupal-restore.sh                      # restore the most recent backup
+#   drupal-restore.sh 20260811-220000      # restore a specific timestamp
+#   drupal-restore.sh --list               # show what is available
+#
+# This DESTROYS the current database and files directory, so it asks for
+# confirmation unless --force is given.
+
+set -euo pipefail
+
+BASE_PATH="{{ drupal_base_path }}"
+FILES_DIR="${BASE_PATH}/web/sites/default/files"
+DEST="{{ drupal_backup_path }}"
+DB_NAME="{{ db_name }}"
+WEB_USER="{{ webserver_user }}"
+WEB_GROUP="{{ webserver_group }}"
+
+FORCE=0
+STAMP=""
+
+log() { echo "[drupal-restore] $*"; }
+fail() { echo "[drupal-restore] ERROR: $*" >&2; exit 1; }
+
+for arg in "$@"; do
+    case "${arg}" in
+        --list)
+            printf '%-18s %10s %10s  %s\n' TIMESTAMP DB FILES VERSION
+            shopt -s nullglob
+            listed=0
+            for m in "${DEST}"/drupal-*.manifest; do
+                listed=1
+                # Parsed as data, never sourced. Sourcing would execute whatever
+                # the file contains, and a manifest is just untrusted input as
+                # far as this script is concerned.
+                mval() { awk -F= -v k="$1" '$1==k {print $2; exit}' "${m}"; }
+                printf '%-18s %10s %10s  %s\n' \
+                    "$(mval timestamp)" \
+                    "$(numfmt --to=iec "$(mval sql_bytes || echo 0)" 2>/dev/null || echo '?')" \
+                    "$(numfmt --to=iec "$(mval files_bytes || echo 0)" 2>/dev/null || echo '?')" \
+                    "$(mval drupal_version)"
+            done
+            [ "${listed}" -eq 1 ] || echo "(no backups in ${DEST})"
+            exit 0
+            ;;
+        --force) FORCE=1 ;;
+        -*) fail "unknown option ${arg}" ;;
+        *) STAMP="${arg}" ;;
+    esac
+done
+
+if [ -z "${STAMP}" ]; then
+    latest=$(find "${DEST}" -maxdepth 1 -name 'drupal-*.sql.gz' -printf '%f\n' 2>/dev/null | sort | tail -1)
+    [ -n "${latest}" ] || fail "no backups found in ${DEST}"
+    STAMP="${latest#drupal-}"
+    STAMP="${STAMP%.sql.gz}"
+fi
+
+PREFIX="${DEST}/drupal-${STAMP}"
+[ -f "${PREFIX}.sql.gz" ] || fail "no database dump for ${STAMP}"
+[ -f "${PREFIX}.files.tar.gz" ] || fail "no files archive for ${STAMP}"
+
+# Verify both archives before destroying anything.
+log "verifying archive integrity"
+gzip -t "${PREFIX}.sql.gz" || fail "database dump is corrupt"
+gzip -t "${PREFIX}.files.tar.gz" || fail "files archive is corrupt"
+
+if [ "${FORCE}" -ne 1 ]; then
+    echo
+    echo "About to restore ${STAMP} into database '${DB_NAME}' and ${FILES_DIR}."
+    echo "The current database and files directory will be DESTROYED."
+    read -r -p "Type 'yes' to continue: " reply
+    [ "${reply}" = "yes" ] || fail "aborted"
+fi
+
+log "restoring database ${DB_NAME}"
+mysql -e "DROP DATABASE IF EXISTS \`${DB_NAME}\`;
+          CREATE DATABASE \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+gunzip -c "${PREFIX}.sql.gz" | mysql "${DB_NAME}"
+
+log "restoring files directory"
+# Replace rather than merge, so files deleted since the backup do not survive.
+rm -rf "${FILES_DIR}"
+tar -xzf "${PREFIX}.files.tar.gz" -C "$(dirname "${FILES_DIR}")"
+chown -R "${WEB_USER}:${WEB_GROUP}" "${FILES_DIR}"
+chmod 0770 "${FILES_DIR}"
+
+if [ -f "${PREFIX}.settings.tar.gz" ]; then
+    log "settings archive present; not overwriting settings.php automatically"
+    log "  extract manually if needed: tar -xzf ${PREFIX}.settings.tar.gz -C ${BASE_PATH}"
+fi
+
+log "rebuilding Drupal caches"
+sudo -u "${WEB_USER}" HOME=/tmp "{{ drupal_drush }}" --root="${BASE_PATH}" cache:rebuild || \
+    log "WARNING: cache rebuild failed; run drush cache:rebuild manually"
+
+log "restore of ${STAMP} complete"

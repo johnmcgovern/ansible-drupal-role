@@ -1,0 +1,18 @@
+[Unit]
+# {{ ansible_managed }}
+Description=Schedule Drupal backups for {{ webserver_sitename }}
+
+[Timer]
+OnCalendar={{ drupal_backup_on_calendar }}
+
+# Spreads load when several sites share a host.
+RandomizedDelaySec={{ drupal_backup_randomized_delay }}
+
+# A backup missed while the host was down runs once it is back, rather than
+# leaving a silent gap in the retention window.
+Persistent=true
+
+Unit=drupal-backup.service
+
+[Install]
+WantedBy=timers.target

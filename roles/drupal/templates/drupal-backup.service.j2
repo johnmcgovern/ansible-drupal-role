@@ -1,0 +1,29 @@
+[Unit]
+# {{ ansible_managed }}
+Description=Back up the Drupal database and files for {{ webserver_sitename }}
+After={{ db_service | default('mariadb') }}.service
+Requires={{ db_service | default('mariadb') }}.service
+
+[Service]
+Type=oneshot
+
+# Runs as root: it dumps through MariaDB's unix_socket authentication, which
+# means no database password has to be stored on disk, and it writes into a
+# root-only directory the web server cannot read.
+User=root
+Group=root
+
+ExecStart=/usr/local/sbin/drupal-backup.sh
+
+TimeoutStartSec={{ drupal_backup_timeout }}
+
+# Backups are IO heavy; keep them from starving the site.
+IOSchedulingClass=idle
+Nice=10
+
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

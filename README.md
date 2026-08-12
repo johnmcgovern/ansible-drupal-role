@@ -178,8 +178,19 @@ load different `conf.d` directories — a CLI-based check would pass even if the
 drop-in were missing entirely.
 
 When `webserver_tls_enabled` is true it additionally checks the HTTP-to-HTTPS redirect,
-the certificate chain, HSTS, that Drupal is emitting `https://` URLs, that
-`certbot.timer` is active, and that the certificate is not within two weeks of expiry.
+the certificate chain, HSTS, that Drupal is emitting `https://` URLs, that TLS 1.0/1.1
+are refused, that `certbot.timer` is active with its deploy hook installed, and that the
+certificate is not within two weeks of expiry.
+
+A live `certbot renew --dry-run` is available but off by default:
+
+```bash
+ansible-playbook -i hosts tests/verify.yml -e verify_check_renewal=true
+```
+
+It performs a real ACME transaction, so it takes a couple of minutes, counts against
+Let's Encrypt rate limits, and fails intermittently on transient authorization state
+that says nothing about the host. Everything else about renewal is checked offline.
 
 Lint before committing:
 
@@ -213,6 +224,57 @@ root-owned files under `files/`, so a regression here fails the run.
 
 On deploy the unit is run once to prove it works under its own user and hardening,
 rather than discovering a permissions problem at the first scheduled run.
+
+
+### Backups
+
+A systemd timer (`drupal-backup.timer`) dumps the database and archives the files
+directory daily, keeping 14 days:
+
+```yaml
+drupal_backup_enabled: true
+drupal_backup_path: /var/backups/drupal
+drupal_backup_on_calendar: daily
+drupal_backup_retention_days: 14
+```
+
+Each run produces four artefacts per timestamp: `.sql.gz`, `.files.tar.gz`,
+`.settings.tar.gz` and a `.manifest`. The settings archive holds `settings.php` and the
+hash salt — without the salt, a restore invalidates every session and one-time login
+link.
+
+**No database password is stored anywhere.** The dump runs as root through MariaDB's
+`unix_socket` authentication, so there is no backup credentials file to leak or rotate.
+It deliberately does not use drush: drush bootstraps Drupal, which writes a Twig cache
+as the invoking user, and doing that as root recreates the root-owned-files problem the
+cron work solved.
+
+The backup directory is `0700 root:root`. The dumps contain every user record and the
+settings archive contains the database password, so the web server must not be able to
+read them — `tests/verify.yml` asserts this.
+
+Cache table *contents* are excluded (schema is kept, since Drupal expects the tables to
+exist); they are regenerated on demand and can dwarf the real data. Regenerable
+`php/`, `css/` and `js/` directories are excluded from the files archive. Image
+derivatives under `styles/` are kept — also regenerable, but rebuilding them all at
+once after a restore is expensive.
+
+#### Restoring
+
+```bash
+drupal-restore.sh --list          # show available backups
+drupal-restore.sh                 # restore the most recent
+drupal-restore.sh 20260812-143756 # restore a specific timestamp
+```
+
+It verifies both archives before destroying anything, replaces the files directory
+rather than merging (so files deleted since the backup do not survive), fixes ownership,
+and rebuilds caches. It asks for confirmation unless given `--force`. `settings.php` is
+*not* overwritten automatically — the restore prints the command to do it manually,
+since the running config is usually the one you want to keep.
+
+This path is tested, not assumed: a canary node and file were created, backed up, then
+the database was dropped and the files directory deleted, and both came back.
 
 
 ### Drupal status report
@@ -310,7 +372,6 @@ warning, because Drupal checks GD regardless of the active toolkit.
 ### ToDo
 
 - Apache TLS vhost is implemented but has only been tested with nginx
-- Database and files backups
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.
   The DB user is still granted from `localhost` only.

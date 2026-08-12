@@ -33,6 +33,11 @@
     verify_tls_staging: "{{ webserver_tls_staging | default(false) | bool }}"
     verify_gd_avif: "{{ php_gd_avif_build | default(false) | bool }}"
     verify_cron_enabled: "{{ drupal_cron_enabled | default(true) | bool }}"
+    verify_backup_enabled: "{{ drupal_backup_enabled | default(true) | bool }}"
+    verify_backup_path: "{{ drupal_backup_path | default('/var/backups/drupal') }}"
+    # Live ACME dry-run renewal: slow, rate limited and intermittently flaky.
+    # Enable with -e verify_check_renewal=true when you want it.
+    verify_check_renewal: false
     # A staging certificate is signed by an untrusted CA by design, so chain
     # validation has to be off for those runs. Everything else is still checked.
     verify_validate_certs: "{{ not (webserver_tls_staging | default(false) | bool) }}"
@@ -276,6 +281,101 @@
 
 
     #
+    # Backups
+    #
+
+    - name: Read the Drupal backup timer state
+      ansible.builtin.systemd_service:
+        name: drupal-backup.timer
+      register: verify_backup_timer
+      changed_when: false
+      when: verify_backup_enabled
+
+    - name: Assert the backup timer is active and scheduled
+      ansible.builtin.assert:
+        that:
+          - verify_backup_timer.status.ActiveState == 'active'
+          - verify_backup_timer.status.UnitFileState == 'enabled'
+          - verify_backup_timer.status.NextElapseUSecRealtime | default('') | length > 0
+        fail_msg: >-
+          drupal-backup.timer is not scheduled:
+          state={{ verify_backup_timer.status.ActiveState | default('?') }}
+      when: verify_backup_enabled
+
+    - name: Read the Drupal backup service state
+      ansible.builtin.systemd_service:
+        name: drupal-backup.service
+      register: verify_backup_service
+      changed_when: false
+      when: verify_backup_enabled
+
+    - name: Assert the last backup run succeeded
+      ansible.builtin.assert:
+        that:
+          - verify_backup_service.status.Result in ['success', '']
+        fail_msg: "Last drupal-backup.service run result was {{ verify_backup_service.status.Result | default('?') }}."
+      when: verify_backup_enabled
+
+    # The dumps contain every user record, and the settings archive contains the
+    # database password, so the web server must not be able to read them.
+    - name: Assert the backup directory is root-only
+      ansible.builtin.stat:
+        path: "{{ verify_backup_path }}"
+      register: verify_backup_dir
+      failed_when: >-
+        not verify_backup_dir.stat.exists
+        or verify_backup_dir.stat.pw_name != 'root'
+        or verify_backup_dir.stat.rgrp or verify_backup_dir.stat.roth
+      when: verify_backup_enabled
+
+    - name: List the backup artefacts
+      ansible.builtin.find:
+        paths: "{{ verify_backup_path }}"
+        patterns: "drupal-*.sql.gz"
+      register: verify_backup_files
+      when: verify_backup_enabled
+
+    - name: Assert at least one database dump exists and is non-trivial
+      ansible.builtin.assert:
+        that:
+          - verify_backup_files.files | length > 0
+          - (verify_backup_files.files | map(attribute='size') | max) > 1024
+        fail_msg: "No usable database dump found in {{ verify_backup_path }}."
+      when: verify_backup_enabled
+
+    # A dump that cannot be decompressed is not a backup. Checking integrity is
+    # the cheapest available proxy for "this would actually restore".
+    - name: Assert the most recent dump passes a gzip integrity check
+      ansible.builtin.command:
+        cmd: gzip -t {{ (verify_backup_files.files | sort(attribute='mtime') | last).path | quote }}
+      changed_when: false
+      when:
+        - verify_backup_enabled
+        - verify_backup_files.files | length > 0
+
+    - name: Assert the most recent dump contains real Drupal data
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          zcat {{ (verify_backup_files.files | sort(attribute='mtime') | last).path | quote }}
+          | grep -c 'CREATE TABLE `users_field_data`'
+        executable: /bin/bash
+      register: verify_backup_content
+      changed_when: false
+      failed_when: (verify_backup_content.stdout | trim | int) < 1
+      when:
+        - verify_backup_enabled
+        - verify_backup_files.files | length > 0
+
+    - name: Assert the restore script is installed and executable
+      ansible.builtin.stat:
+        path: /usr/local/sbin/drupal-restore.sh
+      register: verify_restore_script
+      failed_when: not verify_restore_script.stat.exists or not verify_restore_script.stat.xusr
+      when: verify_backup_enabled
+
+
+    #
     # PHP tuning
     #
 
@@ -442,12 +542,20 @@
         or not verify_deploy_hook.stat.xusr
       when: verify_tls_enabled
 
+    # Opt in with -e verify_check_renewal=true. This performs a real ACME
+    # transaction against Let's Encrypt: it takes a couple of minutes, counts
+    # against rate limits, and fails intermittently on transient authorization
+    # state that says nothing about this host's configuration. The renewal
+    # timer, deploy hook and certificate expiry are all checked above without
+    # touching the network, so routine verification does not need it.
     - name: Assert a certbot dry-run renewal succeeds
       ansible.builtin.command:
         cmd: certbot renew --dry-run --cert-name {{ verify_sitename }}
       register: verify_renew
       changed_when: false
-      when: verify_tls_enabled
+      when:
+        - verify_tls_enabled
+        - verify_check_renewal
 
     - name: Check the certificate is not close to expiry
       ansible.builtin.command:

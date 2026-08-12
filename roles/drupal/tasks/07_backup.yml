@@ -1,0 +1,91 @@
+---
+
+# Root-only: the dumps contain every user record in the site, and the settings
+# archive contains the database password. The web server must not be able to
+# read this directory, or a path traversal bug turns into a full data breach.
+- name: Create the backup directory
+  ansible.builtin.file:
+    path: "{{ drupal_backup_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the backup script
+  ansible.builtin.template:
+    src: drupal-backup.sh.j2
+    dest: /usr/local/sbin/drupal-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+    validate: bash -n %s
+  register: drupal_backup_script
+
+- name: Install the restore script
+  ansible.builtin.template:
+    src: drupal-restore.sh.j2
+    dest: /usr/local/sbin/drupal-restore.sh
+    owner: root
+    group: root
+    mode: "0750"
+    validate: bash -n %s
+
+- name: Install the backup service unit
+  ansible.builtin.template:
+    src: drupal-backup.service.j2
+    dest: /etc/systemd/system/drupal-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: drupal_backup_service_unit
+  notify: Reload systemd
+
+- name: Install the backup timer unit
+  ansible.builtin.template:
+    src: drupal-backup.timer.j2
+    dest: /etc/systemd/system/drupal-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: drupal_backup_timer_unit
+  notify: Reload systemd
+
+- name: Apply the pending systemd reload
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the backup timer
+  ansible.builtin.systemd_service:
+    name: drupal-backup.timer
+    state: started
+    enabled: true
+
+- name: Look for existing backups
+  ansible.builtin.find:
+    paths: "{{ drupal_backup_path }}"
+    patterns: "drupal-*.sql.gz"
+  register: drupal_existing_backups
+
+# Taking one backup at deploy time proves the whole path works -- socket auth,
+# mysqldump, the exclude list, disk space -- instead of discovering a problem at
+# 3am when it first matters. It runs when a script or unit changed, and also
+# whenever no backup exists at all, so a host never sits with the timer enabled
+# but nothing captured. Both conditions are false once a backup is present, so
+# this stays idempotent: a Type=oneshot unit is inactive after it finishes and
+# would otherwise report changed on every run.
+- name: Take an initial backup to prove the path works  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    name: drupal-backup.service
+    state: started
+  when:
+    - drupal_backup_run_on_deploy
+    - drupal_existing_backups.files | length == 0
+      or drupal_backup_script.changed
+      or drupal_backup_service_unit.changed
+      or drupal_backup_timer_unit.changed
+
+- name: Check the result of the backup unit
+  ansible.builtin.systemd_service:
+    name: drupal-backup.service
+  register: drupal_backup_result
+  changed_when: false
+  failed_when: drupal_backup_result.status.Result not in ['success', '']

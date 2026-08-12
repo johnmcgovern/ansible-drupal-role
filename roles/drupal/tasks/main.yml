@@ -29,3 +29,7 @@
 - name: Schedule Drupal cron
   ansible.builtin.import_tasks: 06_cron.yml
   when: drupal_cron_enabled
+
+- name: Schedule Drupal backups
+  ansible.builtin.import_tasks: 07_backup.yml
+  when: drupal_backup_enabled

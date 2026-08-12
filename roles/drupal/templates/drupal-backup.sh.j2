@@ -1,0 +1,131 @@
+#!/bin/bash
+# {{ ansible_managed }}
+#
+# Backs up the Drupal database and files directory.
+#
+# Runs as root and dumps through MariaDB's unix_socket authentication, so no
+# database password is stored anywhere on disk. It deliberately does NOT use
+# drush: drush bootstraps Drupal, which writes a twig cache under
+# sites/default/files as whatever user ran it, and running that as root leaves
+# files the web server cannot rewrite.
+
+set -euo pipefail
+
+BASE_PATH="{{ drupal_base_path }}"
+FILES_DIR="${BASE_PATH}/web/sites/default/files"
+DEST="{{ drupal_backup_path }}"
+DB_NAME="{{ db_name }}"
+RETENTION_DAYS="{{ drupal_backup_retention_days }}"
+STAMP="$(date -u +%Y%m%d-%H%M%S)"
+PREFIX="${DEST}/drupal-${STAMP}"
+
+log() { echo "[drupal-backup] $*"; }
+fail() { echo "[drupal-backup] ERROR: $*" >&2; exit 1; }
+
+# Anything half-written must not be left looking like a usable backup.
+cleanup_partial() {
+    local rc=$?
+    if [ "${rc}" -ne 0 ]; then
+        log "failed (exit ${rc}); removing partial artefacts"
+        rm -f "${PREFIX}.sql.gz" "${PREFIX}.files.tar.gz" "${PREFIX}.settings.tar.gz" "${PREFIX}.manifest"
+    fi
+    return "${rc}"
+}
+trap cleanup_partial EXIT
+
+[ -d "${BASE_PATH}" ] || fail "Drupal base path ${BASE_PATH} does not exist"
+mkdir -p "${DEST}"
+
+#
+# Database
+#
+{% if drupal_backup_exclude_cache %}
+# Cache tables are regenerated on demand, so their contents are dead weight in a
+# backup -- on a busy site they can dwarf the real data. Their schema is still
+# dumped, because Drupal expects the tables to exist.
+CACHE_TABLES=$(mysql -N -B -e \
+    "SELECT table_name FROM information_schema.tables
+     WHERE table_schema='${DB_NAME}' AND table_name LIKE 'cache%';" 2>/dev/null || true)
+
+IGNORE_ARGS=()
+for t in ${CACHE_TABLES}; do
+    IGNORE_ARGS+=("--ignore-table=${DB_NAME}.${t}")
+done
+
+log "dumping database ${DB_NAME} (excluding data from $(echo "${CACHE_TABLES}" | grep -c . || true) cache tables)"
+{
+    # Schema for every table, including the cache tables.
+    mysqldump --single-transaction --quick --no-data --routines --events "${DB_NAME}"
+    # Data for everything except the cache tables.
+    mysqldump --single-transaction --quick --no-create-info \
+        "${IGNORE_ARGS[@]}" "${DB_NAME}"
+} | gzip -6 > "${PREFIX}.sql.gz"
+{% else %}
+log "dumping database ${DB_NAME}"
+mysqldump --single-transaction --quick --routines --events "${DB_NAME}" \
+    | gzip -6 > "${PREFIX}.sql.gz"
+{% endif %}
+
+gzip -t "${PREFIX}.sql.gz" || fail "database dump failed gzip integrity check"
+[ -s "${PREFIX}.sql.gz" ] || fail "database dump is empty"
+
+#
+# Files
+#
+log "archiving ${FILES_DIR}"
+if [ -d "${FILES_DIR}" ]; then
+    tar -czf "${PREFIX}.files.tar.gz" \
+{% for pattern in drupal_backup_files_exclude %}
+        --exclude='{{ pattern }}' \
+{% endfor %}
+        -C "$(dirname "${FILES_DIR}")" "$(basename "${FILES_DIR}")"
+    gzip -t "${PREFIX}.files.tar.gz" || fail "files archive failed gzip integrity check"
+else
+    fail "files directory ${FILES_DIR} does not exist"
+fi
+
+#
+# Settings
+#
+# settings.php and the hash salt are required to bring a site back up. Without
+# the salt every session and one-time login link is invalidated on restore.
+log "archiving settings and hash salt"
+HASH_SALT_FILE="{{ drupal_hash_salt_file }}"
+SETTINGS_MEMBERS=("web/sites/default/settings.php")
+if [ -f "${HASH_SALT_FILE}" ]; then
+    SETTINGS_MEMBERS+=("$(realpath --relative-to="${BASE_PATH}" "${HASH_SALT_FILE}")")
+fi
+tar -czf "${PREFIX}.settings.tar.gz" -C "${BASE_PATH}" "${SETTINGS_MEMBERS[@]}"
+
+#
+# Manifest
+#
+# Single awk pass rather than a grep pipeline: `grep -m1` closes the pipe early,
+# which under `set -o pipefail` makes the whole pipeline fail after it has
+# already printed, appending a spurious fallback value to the manifest. The
+# manifest is sourced as shell by drupal-restore.sh --list, so a stray bare word
+# in it is not cosmetic.
+DRUPAL_VERSION=$(awk '
+    /"name": *"drupal\/core"/ { found = 1 }
+    found && /"version"/ { gsub(/.*: *"|".*/, ""); print; exit }
+' "${BASE_PATH}/composer.lock" 2>/dev/null || true)
+[ -n "${DRUPAL_VERSION}" ] || DRUPAL_VERSION="unknown"
+
+{
+    echo "timestamp=${STAMP}"
+    echo "database=${DB_NAME}"
+    echo "base_path=${BASE_PATH}"
+    echo "sql_bytes=$(stat -c %s "${PREFIX}.sql.gz")"
+    echo "files_bytes=$(stat -c %s "${PREFIX}.files.tar.gz")"
+    echo "drupal_version=${DRUPAL_VERSION}"
+} > "${PREFIX}.manifest"
+
+chmod 0600 "${PREFIX}".*
+
+#
+# Retention
+#
+log "pruning backups older than ${RETENTION_DAYS} days"
+find "${DEST}" -maxdepth 1 -type f -name 'drupal-*' -mtime "+${RETENTION_DAYS}" -print -delete
+
+log "completed: ${PREFIX}.{sql.gz,files.tar.gz,settings.tar.gz,manifest}"
