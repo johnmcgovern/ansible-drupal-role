@@ -19,6 +19,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
+    # pipefail matters here: steps below pipe ansible-playbook into tee, and
+    # without it the step exits with tee's status. A failed deploy reported a
+    # green step until this was set.
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4

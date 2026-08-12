@@ -13,6 +13,13 @@
 # trying to switch users for a local connection.
 ansible_user: "{{ lookup('env', 'USER') }}"
 
+# Modules must run under the system Python, not the tool-cache Python that
+# actions/setup-python provides. The db role installs python3-pymysql with apt,
+# which lands in the system interpreter's dist-packages; without this, the mysql
+# modules fail with "A MySQL module is required" even though the package is
+# installed. Only an artefact of the CI runner -- a real target has one Python.
+ansible_python_interpreter: /usr/bin/python3
+
 webserver_sitename: localhost
 webserver_email: ci@example.invalid
 
