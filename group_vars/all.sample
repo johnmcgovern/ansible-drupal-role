@@ -67,6 +67,25 @@ php_max_execution_time: 60
 php_opcache_memory_consumption: 192
 php_apcu_shm_size: 64M
 
+# AVIF support in GD -- OPT IN, DISABLED BY DEFAULT.
+#
+# Ubuntu ships libgd2 without libavif deliberately (LP#2031934) and will not fix
+# it for 24.04, so Drupal 11.2+ reports a GD status page warning that cannot be
+# cleared with distribution packages. Setting this true compiles a private libgd
+# and PHP gd extension under /opt/gd-avif and points PHP at them. The system
+# libgd3 is left alone and stays managed by apt.
+#
+# WARNING -- what you take on by enabling it:
+#   * libgd and libavif security updates no longer reach the copy PHP loads.
+#   * A PHP upgrade that changes the extension ABI requires a rebuild. The
+#     build stamp detects it, but the site runs without GD in the meantime.
+#   * ~250 MB of build tooling is installed on the target and stays there.
+#   * Ubuntu does not support this configuration.
+#
+# If you only need AVIF derivatives and not a clean status page, php-imagick
+# with the ImageMagick toolkit module is the supported alternative.
+php_gd_avif_build: false
+
 # pm.max_children caps concurrent PHP requests. Budget roughly
 # max_children * php_memory_limit as the worst case, and lower it on a small VM.
 php_fpm_pool_settings:

@@ -106,6 +106,44 @@ php_fpm_pool_settings:
   pm.max_spare_servers: 6
   pm.max_requests: 500
 
+#
+# AVIF support in GD -- OPT IN, DISABLED BY DEFAULT
+#
+# Ubuntu ships libgd2 without libavif on purpose: libgd2 is in main, libavif's
+# Rust dependency tree keeps it in universe, and main cannot build-depend on
+# universe. The maintainer has stated no fix will be backported to stable
+# releases (LP#2031934). Drupal 11.2+ therefore reports a status page warning
+# that cannot be cleared with distribution packages alone.
+#
+# Enabling this compiles a private libgd and PHP gd extension under
+# php_gd_avif_prefix and points PHP at them. The system libgd3 is left alone and
+# stays managed by apt, so nothing else on the host changes.
+#
+# What you take on by enabling it:
+#   - libgd and libavif security updates no longer reach the copy PHP loads.
+#     apt will patch the system libgd3; it will not touch this build.
+#   - A PHP upgrade that changes the extension ABI needs a rebuild. The build
+#     stamp detects this, but the site runs without GD between the apt upgrade
+#     and the next playbook run.
+#   - Roughly 250 MB of build tooling is installed on the target and stays.
+#
+# If you only need AVIF derivatives and not a clean status page, php-imagick
+# with the ImageMagick toolkit module is the supported alternative and needs
+# none of this.
+php_gd_avif_build: false
+
+php_gd_avif_prefix: /opt/gd-avif
+php_gd_avif_src_dir: /usr/local/src/gd-avif
+
+# Bump to force a rebuild without a PHP or libgd version change.
+php_gd_avif_build_rev: 1
+
+php_gd_avif_apt_mirror: http://archive.ubuntu.com/ubuntu
+php_gd_avif_apt_suites:
+  - noble
+  - noble-updates
+  - noble-security
+
 php_packages:
   - php-apcu
   - php-cli

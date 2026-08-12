@@ -216,8 +216,48 @@ by default are handled:
   [AVIF issue](https://www.drupal.org/project/drupal/issues/3202016) endorses), or
   wait for a post-libavif-MIR Ubuntu release. Drupal's requirement is documented in
   [the AVIF change record](https://www.drupal.org/node/3348348) (Drupal 11.2.0).
-  `tests/verify.yml` therefore allows exactly this one item, by name, so that any
-  *other* warning still fails the run.
+  By default `tests/verify.yml` allows exactly this one item, by name, so that any
+  *other* warning still fails the run. It can be resolved with an opt-in local
+  build — see below.
+
+
+### AVIF support in GD (opt-in, disabled by default)
+
+Setting `php_gd_avif_build: true` compiles an AVIF-capable GD for PHP and clears the
+last status report warning. It is off by default and should stay off unless you have
+a concrete need for AVIF image derivatives.
+
+How it works: Ubuntu's own `debian/rules` already passes `--with-avif`, and
+`libavif-dev` is in the archive — the package simply is not built against it. The role
+fetches Ubuntu's `libgd2` and `php8.3` sources with `apt-get source`, builds libgd into
+a private prefix (`/opt/gd-avif`) with AVIF enabled, builds `ext/gd` against it via
+`phpize` with an rpath to that prefix, and repoints PHP's `20-gd.ini` at the result.
+
+The system `libgd3` is **not** touched. It stays exactly as apt installed it, which
+avoids the trap of a locally built package carrying the same version string as the
+official one and being silently reverted on the next upgrade. `tests/verify.yml`
+asserts `dpkg -V libgd3` still passes, so a regression there fails the run.
+
+The build self-tests by encoding a real AVIF image and aborts if that fails, leaving
+the distribution GD module in place — a failed build cannot break the site. Setting the
+flag back to `false` restores the distribution module.
+
+**What you take on by enabling it:**
+
+- libgd and libavif security updates no longer reach the copy PHP loads. apt will keep
+  patching the system `libgd3`; it will not touch this build. You are tracking those
+  advisories yourself.
+- A PHP upgrade that changes the extension ABI needs a rebuild. A build stamp records
+  the PHP ABI and libgd version and triggers one automatically, but between the apt
+  upgrade and the next playbook run PHP will fail to load GD. Ubuntu 24.04 stays on PHP
+  8.3 for its supported life, so in practice this means point releases, which do not
+  change the ABI.
+- Roughly 250 MB of build tooling is installed on the target and stays there.
+- Ubuntu does not support this configuration.
+
+If you want AVIF derivatives but not the maintenance, `php-imagick` with the
+ImageMagick toolkit contrib module is the supported route. It will not clear the GD
+warning, because Drupal checks GD regardless of the active toolkit.
 
 
 ### Notes

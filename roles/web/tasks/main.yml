@@ -12,3 +12,9 @@
 - name: Configure TLS
   ansible.builtin.import_tasks: 04_tls.yml
   when: webserver_tls_enabled
+
+# Imported unconditionally so that turning the flag back off reverts PHP to the
+# distribution GD module instead of leaving it pointed at a build the playbook
+# no longer maintains.
+- name: Configure the GD extension
+  ansible.builtin.import_tasks: 05_gd_avif.yml

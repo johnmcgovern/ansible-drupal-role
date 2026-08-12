@@ -1,0 +1,112 @@
+#!/bin/bash
+# {{ ansible_managed }}
+#
+# Builds an AVIF-capable PHP GD extension for Ubuntu 24.04.
+#
+# Ubuntu deliberately builds libgd2 without libavif: libgd2 lives in main,
+# libavif's Rust dependency tree keeps it in universe, and main packages may not
+# build-depend on universe. See LP#2031934. Ubuntu's debian/rules still passes
+# --with-avif, so the only thing missing at build time is libavif-dev.
+#
+# Everything is installed under a private prefix and the system libgd3 is left
+# completely alone, so apt keeps managing it and a package upgrade cannot
+# silently swap our build out from under PHP.
+
+set -euo pipefail
+
+PREFIX="{{ php_gd_avif_prefix }}"
+SRC="{{ php_gd_avif_src_dir }}"
+PHP_VERSION="{{ php_version }}"
+
+rm -rf "$SRC"
+mkdir -p "$SRC" "$PREFIX/lib/php"
+cd "$SRC"
+
+echo "==> Fetching libgd source (Ubuntu's, so distro patches are preserved)"
+apt-get source libgd2
+GD_DIR="$(find . -maxdepth 1 -type d -name 'libgd2-*' | head -1)"
+[ -n "$GD_DIR" ] || { echo "FATAL: libgd2 source not found" >&2; exit 1; }
+
+echo "==> Building libgd into $PREFIX"
+cd "$GD_DIR"
+
+# dpkg-source applies the Debian patches, which leaves configure.ac newer than
+# the shipped aclocal.m4/Makefile.in. make then tries to regenerate them and
+# dies on the skew between the shipped automake (1.16.1) and the installed one.
+# dpkg-buildpackage avoids this by running autoreconf via dh-autoreconf, so do
+# the same rather than fighting timestamps.
+autoreconf -fi
+
+./configure \
+    --prefix="$PREFIX" \
+    --disable-dependency-tracking \
+    --with-avif=/usr \
+    --with-webp \
+    --with-jpeg \
+    --with-png \
+    --with-freetype \
+    --with-tiff \
+    --with-heif \
+    --with-xpm \
+    --with-fontconfig \
+    --disable-static
+
+# configure disables AVIF silently when libavif-dev is absent, which is exactly
+# the bug being worked around, so confirm it was actually detected.
+if ! grep -q 'Support for AVIF library:[[:space:]]*yes' config.log; then
+    echo "FATAL: configure did not detect libavif; is libavif-dev installed?" >&2
+    exit 1
+fi
+
+make -j"$(nproc)"
+make install
+
+if ! nm -D "$PREFIX/lib/libgd.so" 2>/dev/null | grep -q gdImageAvifPtr; then
+    echo "FATAL: built libgd has no AVIF support (gdImageAvifPtr missing)" >&2
+    exit 1
+fi
+echo "==> libgd built with AVIF"
+
+echo "==> Fetching PHP $PHP_VERSION source for ext/gd"
+cd "$SRC"
+apt-get source "php$PHP_VERSION"
+PHP_DIR="$(find . -maxdepth 1 -type d -name "php$PHP_VERSION-*" | head -1)"
+[ -n "$PHP_DIR" ] || { echo "FATAL: php$PHP_VERSION source not found" >&2; exit 1; }
+
+echo "==> Building ext/gd against $PREFIX"
+cd "$PHP_DIR/ext/gd"
+phpize
+# PKG_CONFIG_PATH points configure at our libgd rather than the system one.
+# The rpath is what makes the resulting gd.so load our libgd at runtime without
+# putting the private prefix on the global loader path.
+PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" \
+LDFLAGS="-Wl,-rpath,$PREFIX/lib" \
+    ./configure \
+        --with-php-config="/usr/bin/php-config$PHP_VERSION" \
+        --with-external-gd \
+        --with-avif
+
+make -j"$(nproc)"
+
+install -m 0644 modules/gd.so "$PREFIX/lib/php/gd.so"
+
+echo "==> Verifying the built extension"
+AVIF=$(php -n -d extension="$PREFIX/lib/php/gd.so" \
+        -r 'echo gd_info()["AVIF Support"] ? "yes" : "no";')
+if [ "$AVIF" != "yes" ]; then
+    echo "FATAL: built gd.so reports AVIF Support = $AVIF" >&2
+    exit 1
+fi
+
+# gd_info() reporting true is not proof the codec works; Ubuntu users have seen
+# it report enabled while imageavif() failed at runtime. Encode a real image.
+php -n -d extension="$PREFIX/lib/php/gd.so" -r '
+    $im = imagecreatetruecolor(32, 32);
+    if (!imageavif($im, "/tmp/.gd-avif-selftest.avif", 30)) {
+        fwrite(STDERR, "FATAL: imageavif() failed\n");
+        exit(1);
+    }
+' || exit 1
+rm -f /tmp/.gd-avif-selftest.avif
+
+echo "==> AVIF-capable gd.so installed at $PREFIX/lib/php/gd.so"

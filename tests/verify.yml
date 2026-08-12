@@ -25,11 +25,13 @@
     # Status report items that cannot be resolved on Ubuntu 24.04. "GD library"
     # is a warning purely because GD lacks AVIF: neither Ubuntu's php8.3-gd nor
     # the ondrej PPA build has AVIF compiled in (verified by inspecting both
-    # binaries), because noble's libgd3 is not built against libavif. Clearing
-    # it would mean building PHP's gd extension from source.
-    verify_status_allowed:
-      - GD library
+    # binaries), because noble's libgd3 is not built against libavif.
+    # With php_gd_avif_build enabled the custom build resolves it, so the
+    # allowlist empties and a GD warning becomes a failure again.
+    verify_status_allowed: >-
+      {{ [] if (php_gd_avif_build | default(false) | bool) else ['GD library'] }}
     verify_tls_staging: "{{ webserver_tls_staging | default(false) | bool }}"
+    verify_gd_avif: "{{ php_gd_avif_build | default(false) | bool }}"
     # A staging certificate is signed by an untrusted CA by design, so chain
     # validation has to be off for those runs. Everything else is still checked.
     verify_validate_certs: "{{ not (webserver_tls_staging | default(false) | bool) }}"
@@ -225,6 +227,41 @@
           - "'apcu' in verify_php_ini.stdout"
         fail_msg: "APCu is not loaded in PHP-FPM; Drupal's status report will flag the cache backend."
       when: verify_webserver_type == 'nginx'
+
+    - name: Assert GD reports AVIF when the custom build is enabled
+      ansible.builtin.assert:
+        that:
+          - verify_php['gd.avif_support'] | default(verify_php_ini.stdout is search('AVIF Support => enabled'))
+        fail_msg: "php_gd_avif_build is enabled but PHP-FPM does not report AVIF support."
+      when: verify_gd_avif | bool
+
+    # gd_info() has been observed reporting AVIF as enabled on Ubuntu while
+    # imageavif() failed at runtime, so encode a real image rather than trust it.
+    # Cleans up after itself so this playbook stays read-only.
+    - name: Assert GD can actually encode an AVIF image
+      ansible.builtin.command:
+        cmd: >-
+          php -r '$f = tempnam(sys_get_temp_dir(), "avif");
+          $im = imagecreatetruecolor(16, 16);
+          $ok = imageavif($im, $f, 30);
+          $valid = $ok && filesize($f) > 0;
+          unlink($f);
+          if (!$valid) { exit(1); }
+          echo "ok";'
+      register: verify_avif_encode
+      changed_when: false
+      failed_when: verify_avif_encode.stdout is not search('ok')
+      when: verify_gd_avif | bool
+
+    # The whole point of the private prefix is that apt keeps managing the
+    # system libgd3. If this ever fails, the build clobbered a distro package.
+    - name: Assert the system libgd3 is still the unmodified distribution package
+      ansible.builtin.command:
+        cmd: dpkg -V libgd3
+      register: verify_libgd_intact
+      changed_when: false
+      failed_when: verify_libgd_intact.rc != 0
+      when: verify_gd_avif | bool
 
     - name: Assert the PHP and web server upload limits agree
       ansible.builtin.assert:

@@ -1,0 +1,192 @@
+---
+# Opt-in, off by default. See the README for why this is not the recommended
+# path and what it costs to run.
+
+#
+# Revert path -- runs when the flag is off, so disabling it is a real undo
+# rather than leaving PHP loading a build nobody maintains any more.
+#
+
+- name: Check whether PHP is pointed at a custom GD build
+  ansible.builtin.stat:
+    path: "/etc/php/{{ php_version }}/{{ (webserver_type == 'nginx') | ternary('fpm', 'apache2') }}/conf.d/20-gd.ini"
+  register: gd_ini_state
+  when: not php_gd_avif_build
+
+# The distribution ships this as a symlink into mods-available. The build path
+# below replaces it with a regular file, so a regular file here means a custom
+# build is active and needs undoing.
+- name: Restore the distribution GD module
+  ansible.builtin.file:
+    src: "/etc/php/{{ php_version }}/mods-available/gd.ini"
+    dest: "/etc/php/{{ php_version }}/{{ item }}/conf.d/20-gd.ini"
+    state: link
+    force: true
+  loop: "{{ ['cli', 'fpm'] if webserver_type == 'nginx' else ['cli', 'apache2'] }}"
+  when:
+    - not php_gd_avif_build
+    - gd_ini_state.stat.exists | default(false)
+    - not (gd_ini_state.stat.islnk | default(true))
+  notify: Restart php-fpm
+
+
+#
+# Build path
+#
+
+- name: Build an AVIF-capable GD extension
+  when: php_gd_avif_build
+  block:
+
+    - name: Warn that the AVIF GD build is unsupported
+      ansible.builtin.debug:
+        msg: >-
+          php_gd_avif_build is enabled. This compiles a private libgd and PHP gd
+          extension under {{ php_gd_avif_prefix }}, replacing the distribution
+          gd module for PHP only. Ubuntu does not support this configuration
+          (LP#2031934) and will not ship a fix for 24.04. You are taking on
+          responsibility for rebuilding after PHP upgrades, and for tracking
+          libgd and libavif security advisories yourself, because apt no longer
+          does it for the copy PHP loads.
+
+    - name: Install the build toolchain
+      ansible.builtin.apt:
+        name:
+          # autoconf/automake/libtool are needed because the build runs
+          # autoreconf to regenerate the build system, as dpkg-buildpackage does.
+          - autoconf
+          - automake
+          - build-essential
+          - dpkg-dev
+          - libavif-dev
+          - libtool
+          - "php{{ php_version }}-dev"
+          - pkg-config
+        state: present
+
+    # apt-get source needs deb-src. Added as a separate file rather than editing
+    # the packaged ubuntu.sources, so nothing conflicts on upgrade.
+    - name: Enable deb-src for source packages
+      ansible.builtin.deb822_repository:
+        name: ubuntu-src
+        types: [deb-src]
+        uris: "{{ php_gd_avif_apt_mirror }}"
+        suites: "{{ php_gd_avif_apt_suites }}"
+        components: [main, universe]
+        signed_by: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+        state: present
+      register: gd_avif_debsrc
+
+    # Cannot be a handler: apt-get source in the next task needs the refreshed
+    # lists immediately, and handlers do not run until the end of the play.
+    - name: Refresh the apt cache so source packages are visible  # noqa: no-handler
+      ansible.builtin.apt:
+        update_cache: true
+      when: gd_avif_debsrc.changed
+
+    # There is no Ansible module for build-dep, and expanding libgd2's build
+    # dependencies by hand would silently rot as the package changes.
+    - name: Install the libgd build dependencies  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: apt-get build-dep -y libgd2
+      changed_when: false
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    # The extension is tied to PHP's ABI (the "PHP Extension" number) and to the
+    # libgd source version. Recording both means a PHP upgrade that changes the
+    # ABI triggers a rebuild instead of leaving a gd.so that will not load.
+    - name: Determine the PHP extension ABI
+      ansible.builtin.shell:
+        cmd: set -o pipefail && php -i | awk '/^PHP Extension => /{print $NF}'
+        executable: /bin/bash
+      register: gd_avif_php_abi
+      changed_when: false
+
+    - name: Determine the packaged libgd version
+      ansible.builtin.command:
+        cmd: dpkg-query -W -f=${Version} libgd3
+      register: gd_avif_libgd_version
+      changed_when: false
+
+    - name: Compose the build stamp
+      ansible.builtin.set_fact:
+        gd_avif_stamp: >-
+          php-abi={{ gd_avif_php_abi.stdout | trim }}
+          libgd={{ gd_avif_libgd_version.stdout | trim }}
+          php={{ php_version }}
+          rev={{ php_gd_avif_build_rev }}
+
+    - name: Read the existing build stamp
+      ansible.builtin.slurp:
+        src: "{{ php_gd_avif_prefix }}/.build-stamp"
+      register: gd_avif_existing_stamp
+      failed_when: false
+
+    - name: Decide whether a rebuild is required
+      ansible.builtin.set_fact:
+        gd_avif_rebuild: >-
+          {{ (gd_avif_existing_stamp.content is not defined)
+             or ((gd_avif_existing_stamp.content | b64decode | trim) != (gd_avif_stamp | trim)) }}
+
+    - name: Install the build script
+      ansible.builtin.template:
+        src: build-gd-avif.sh.j2
+        dest: /usr/local/sbin/build-gd-avif.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Compiling libgd and ext/gd takes a few minutes. The script self-tests by
+    # encoding a real AVIF and exits non-zero if anything is wrong, so a failure
+    # here leaves the distribution gd module still in place and untouched.
+    - name: Build the AVIF-capable GD extension
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/build-gd-avif.sh
+      when: gd_avif_rebuild | bool
+      changed_when: true
+
+    # Replaces the symlink to mods-available/gd.ini with a real file, so the
+    # distribution gd.so is not loaded alongside ours (PHP would warn that the
+    # module is already loaded). A php-gd package upgrade may restore the
+    # symlink; the next playbook run puts this back.
+    - name: Point PHP at the AVIF-capable GD extension
+      ansible.builtin.copy:
+        dest: "/etc/php/{{ php_version }}/{{ item }}/conf.d/20-gd.ini"
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+        content: |
+          ; Managed by Ansible. Local edits will be overwritten.
+          ; Replaces the distribution gd module with an AVIF-capable build.
+          ; priority=20
+          extension={{ php_gd_avif_prefix }}/lib/php/gd.so
+      loop: "{{ ['cli', 'fpm'] if webserver_type == 'nginx' else ['cli', 'apache2'] }}"
+      notify: Restart php-fpm
+
+    - name: Apply the pending PHP-FPM restart
+      ansible.builtin.meta: flush_handlers
+
+    - name: Confirm PHP still loads GD and now reports AVIF
+      ansible.builtin.command:
+        cmd: >-
+          php -r 'if (!extension_loaded("gd")) { exit(2); }
+          if (empty(gd_info()["AVIF Support"])) { exit(3); }
+          echo "ok";'
+      register: gd_avif_check
+      changed_when: false
+      failed_when: gd_avif_check.stdout is not search('ok')
+
+    - name: Record the build stamp
+      ansible.builtin.copy:
+        dest: "{{ php_gd_avif_prefix }}/.build-stamp"
+        owner: root
+        group: root
+        mode: "0644"
+        content: "{{ gd_avif_stamp | trim }}\n"
+
+    - name: Remove the build sources
+      ansible.builtin.file:
+        path: "{{ php_gd_avif_src_dir }}"
+        state: absent
