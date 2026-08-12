@@ -392,6 +392,12 @@ warning, because Drupal checks GD regardless of the active toolkit.
 
 ### ToDo
 
+- **PHP 8.4.** Drupal's status report recommends 8.4 or newer for ongoing support.
+  Noble ships 8.3 only, so this needs `ppa:ondrej/php`. Unlike the AVIF case that PPA
+  genuinely does provide 8.4, so the tradeoff is real rather than pointless: a
+  third-party repository in the base system's dependency graph, in exchange for a
+  supported PHP. Note 8.3 has security support until December 2027, so this is not
+  urgent.
 - Apache TLS vhost is implemented but has only been tested with nginx
 - Splitting the web and DB tiers across separate hosts is wired up (`db_host` is a
   variable and no longer hardcoded to localhost) but has not been tested end to end.
