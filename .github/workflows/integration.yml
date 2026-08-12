@@ -41,16 +41,25 @@ jobs:
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r requirements.yml
 
-      # The runner image ships MySQL, which conflicts with mariadb-server, and
-      # may ship Apache, which would hold port 80 before nginx can bind it.
-      # Neither is installed by these roles; this is purely about the image.
+      # The runner image ships MySQL server, the MySQL client libraries and
+      # sometimes Apache. None of it comes from these roles, and none of it is
+      # present on a plain Ubuntu Server target, but MySQL conflicts with
+      # mariadb-server, Apache would hold port 80 before nginx can bind it, and
+      # libmysqlclient* trips the MariaDB-only assertion in tests/verify.yml.
+      # Stripping them makes the runner resemble a real target.
       - name: Remove conflicting preinstalled services
         run: |
           sudo systemctl stop mysql apache2 2>/dev/null || true
-          sudo apt-get purge -y -qq 'mysql-server*' 'mysql-client*' 'mysql-community*' apache2 2>/dev/null || true
+          sudo apt-get purge -y -qq \
+            'mysql-server*' 'mysql-client*' 'mysql-community*' \
+            'libmysqlclient*' apache2 2>/dev/null || true
           sudo apt-get autoremove --purge -y -qq 2>/dev/null || true
           echo "listening on :80 ->"
           sudo ss -lntp | grep ':80 ' || echo "  nothing (good)"
+          echo "MySQL-variant packages remaining (mysql-common is a MariaDB dep) ->"
+          dpkg-query -W -f='${Package} ${Status}\n' 2>/dev/null \
+            | awk '$NF == "installed" { print "  " $1 }' \
+            | grep -E 'mysql|percona' || echo "  none"
 
       # Copied verbatim so the sample is exercised on every run; CI-specific
       # values are layered on with -e rather than by editing it.
