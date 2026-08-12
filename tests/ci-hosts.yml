@@ -1,0 +1,15 @@
+---
+# Inventory used by CI. The GitHub runner is itself Ubuntu 24.04 with systemd,
+# so the playbook runs against it directly rather than against a container.
+# That avoids the systemd-in-Docker workarounds that would otherwise mask real
+# problems with the timers and services this role installs.
+all:
+  children:
+    webservers:
+      hosts:
+        localhost:
+          ansible_connection: local
+    dbservers:
+      hosts:
+        localhost:
+          ansible_connection: local

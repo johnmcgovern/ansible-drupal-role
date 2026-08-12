@@ -1,0 +1,36 @@
+---
+name: Lint
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: ansible-lint and yamllint
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install linters
+        run: pip install --disable-pip-version-check ansible-lint yamllint
+
+      # ansible-lint resolves modules through the installed collections; without
+      # these it reports every FQCN in the roles as an unknown module.
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint .
+
+      - name: Run ansible-lint
+        run: ansible-lint

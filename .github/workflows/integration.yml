@@ -1,0 +1,102 @@
+---
+name: Integration
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A run takes several minutes and installs a full LAMP stack; superseded runs on
+# the same branch are not worth finishing.
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy and verify on Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install --disable-pip-version-check ansible-core
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # The runner image ships MySQL, which conflicts with mariadb-server, and
+      # may ship Apache, which would hold port 80 before nginx can bind it.
+      - name: Remove conflicting preinstalled services
+        run: |
+          sudo systemctl stop mysql apache2 2>/dev/null || true
+          sudo apt-get purge -y -qq 'mysql-server*' 'mysql-client*' 'mysql-community*' apache2 2>/dev/null || true
+          sudo apt-get autoremove --purge -y -qq 2>/dev/null || true
+          echo "listening on :80 ->"
+          sudo ss -lntp | grep ':80 ' || echo "  nothing (good)"
+
+      # Copied verbatim so the sample is exercised on every run; CI-specific
+      # values are layered on with -e rather than by editing it.
+      - name: Prepare inventory and variables
+        run: cp group_vars/all.sample group_vars/all
+
+      - name: Run the playbook
+        run: |
+          ansible-playbook -i tests/ci-hosts.yml site.yml \
+            -e @tests/ci-vars.yml | tee /tmp/run1.log
+
+      - name: Verify the deployment
+        run: |
+          ansible-playbook -i tests/ci-hosts.yml tests/verify.yml \
+            -e @tests/ci-vars.yml
+
+      # The second run is the actual assertion: a converged host must report no
+      # changes. This is the check most likely to catch a regression, because
+      # non-idempotent tasks still look fine on a first run.
+      - name: Run the playbook again and assert idempotency
+        run: |
+          ansible-playbook -i tests/ci-hosts.yml site.yml \
+            -e @tests/ci-vars.yml | tee /tmp/run2.log
+          recap=$(grep -E '^localhost\s+:' /tmp/run2.log | tail -1)
+          echo "recap: ${recap}"
+          if ! echo "${recap}" | grep -qE 'changed=0\s'; then
+            echo "::error::Playbook is not idempotent: ${recap}"
+            exit 1
+          fi
+          if ! echo "${recap}" | grep -qE 'failed=0\s'; then
+            echo "::error::Second run reported failures: ${recap}"
+            exit 1
+          fi
+
+      # Independent of the verify playbook: proves the site answers over HTTP
+      # from outside Ansible entirely.
+      - name: Check the site responds
+        run: |
+          status=$(curl -s -o /tmp/page.html -w '%{http_code}' http://127.0.0.1/)
+          echo "HTTP ${status}"
+          test "${status}" = "200"
+          grep -q "Drupal" /tmp/page.html
+
+      - name: Show diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== systemd units ==="
+          systemctl --failed --no-pager || true
+          echo "=== nginx ==="
+          sudo nginx -t 2>&1 || true
+          sudo journalctl -u nginx -n 40 --no-pager || true
+          echo "=== php-fpm ==="
+          sudo journalctl -u 'php*-fpm' -n 40 --no-pager || true
+          echo "=== mariadb ==="
+          sudo journalctl -u mariadb -n 40 --no-pager || true
+          echo "=== drupal cron / backup ==="
+          sudo journalctl -u drupal-cron -u drupal-backup -n 40 --no-pager || true

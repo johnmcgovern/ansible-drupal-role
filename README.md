@@ -1,5 +1,8 @@
 # Ansible-Drupal-Role
 
+[![Lint](https://github.com/johnmcgovern/ansible-drupal-role/actions/workflows/lint.yml/badge.svg)](https://github.com/johnmcgovern/ansible-drupal-role/actions/workflows/lint.yml)
+[![Integration](https://github.com/johnmcgovern/ansible-drupal-role/actions/workflows/integration.yml/badge.svg)](https://github.com/johnmcgovern/ansible-drupal-role/actions/workflows/integration.yml)
+
 Ansible roles that install a default Drupal instance (latest stable release) with all
 required configuration and dependencies. At a high level this installs:
 
@@ -197,6 +200,24 @@ Lint before committing:
 ```bash
 ansible-lint && yamllint .
 ```
+
+#### Continuous integration
+
+Two GitHub Actions workflows run on every push and pull request:
+
+- **Lint** — `yamllint` and `ansible-lint` at the `production` profile.
+- **Integration** — deploys the full stack and runs `tests/verify.yml`. The runner is
+  itself Ubuntu 24.04 with systemd, so the playbook runs against it directly rather
+  than against a container; that avoids the systemd-in-Docker workarounds that would
+  otherwise mask real problems with the timers and services this role installs.
+
+The integration job runs the playbook **twice** and fails if the second run reports any
+changes. That assertion is the one most likely to catch a regression, because a
+non-idempotent task still looks fine on a first run.
+
+CI copies `group_vars/all.sample` verbatim and layers CI-specific values on with `-e`,
+so the sample is exercised on every run and cannot silently drift from what the roles
+expect.
 
 
 ### Cron

@@ -1,0 +1,39 @@
+---
+# Overrides applied on top of group_vars/all.sample when running in CI.
+#
+# CI copies the sample verbatim and layers this on with -e, so the sample itself
+# is exercised on every run and cannot silently drift away from what the roles
+# expect.
+#
+# The passwords here are throwaway values for an ephemeral runner that is
+# destroyed at the end of the job. They are not secrets and must never be used
+# on a real host.
+
+# The runner is the target. Setting this to the invoking user keeps Ansible from
+# trying to switch users for a local connection.
+ansible_user: "{{ lookup('env', 'USER') }}"
+
+webserver_sitename: localhost
+webserver_email: ci@example.invalid
+
+# No public DNS on a runner, so ACME cannot validate.
+webserver_tls_enabled: false
+
+# The AVIF build takes about ten minutes and is opt-in for real deployments; it
+# has its own workflow rather than running on every push.
+php_gd_avif_build: false
+
+db_user_password: ci-not-a-secret-db-password
+drupal_admin_password: ci-not-a-secret-admin-password
+
+drupal_email: ci@example.invalid
+drupal_sitename: CI Test Site
+
+# Keep the module set small so the job stays fast; installing modules is already
+# covered by the tasks themselves.
+drupal_install_modules:
+  - token
+  - pathauto
+drupal_enable_modules:
+  - token
+  - pathauto
