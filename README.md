@@ -7,7 +7,7 @@ Ansible roles that install a default Drupal instance (latest stable release) wit
 required configuration and dependencies. At a high level this installs:
 
 - nginx
-- PHP 8.3 + PHP-FPM
+- PHP + PHP-FPM (8.3 on 24.04, 8.5 on 26.04)
 - MariaDB
 - Composer
 - Drush
@@ -19,7 +19,7 @@ The goal is a base Drupal install with no errors on the status report.
 
 ### Compatibility
 
-**Ubuntu 24.04 LTS (noble) only.**
+**Ubuntu 24.04 LTS (noble) and 26.04 LTS (resolute).**
 
 **nginx and MariaDB only.** Apache support was removed — it was never tested, and every
 feature (TLS, PHP tuning, the GD build) had to carry a second untested code path. Anyone
@@ -27,10 +27,28 @@ still setting `webserver_type` gets an explicit error rather than a silent subst
 The database is MariaDB; the roles assert the running server reports `MariaDB` and that
 no MySQL or Percona packages are installed.
 
-The `common` role asserts the OS and fails immediately on anything else. Ubuntu 24.04
-ships PHP 8.3 and MariaDB 10.11, which satisfy the requirements of current Drupal
-releases. Earlier Ubuntu releases are no longer supported — support for 18.04/20.04
-was removed along with the workarounds those releases needed.
+The `common` role asserts the OS and fails immediately on anything else. Both releases
+are exercised by a blocking CI leg on every push, so this list and CI cannot drift apart.
+Earlier Ubuntu releases are not supported — 18.04/20.04 were dropped along with the
+workarounds they needed.
+
+|            | 24.04 (noble) | 26.04 (resolute) |
+|------------|---------------|------------------|
+| PHP        | 8.3           | 8.5              |
+| MariaDB    | 10.11         | 11.8             |
+| nginx      | 1.24          | 1.28             |
+
+Nothing pins those versions. The PHP version is discovered at runtime and every derived
+path (the FPM socket, the service name, the `conf.d` directories) follows from it; the
+nginx vhost picks its `http2` syntax from the installed nginx; and optional PHP packages
+are probed with apt rather than assumed. Two differences are worth knowing about:
+
+- **OPcache.** `php-opcache` is a separate package through PHP 8.4 but does not exist on
+  26.04, where PHP 8.5 builds OPcache into the interpreter. Naming a missing package
+  aborts the whole apt transaction, so optional packages are installed only when apt
+  offers a candidate, and the play reports what it skipped.
+- **AVIF.** Still absent from 26.04's `libgd3`, exactly as on 24.04, so the opt-in
+  `php_gd_avif_build` remains relevant on both.
 
 
 ### Requirements
@@ -46,7 +64,7 @@ ansible-galaxy collection install -r requirements.yml
 
 On the **target server**:
 
-- Ubuntu 24.04 LTS with `python3` (present by default on Ubuntu Server)
+- Ubuntu 24.04 LTS or 26.04 LTS with `python3` (present by default on Ubuntu Server)
 - An SSH account with `sudo` access
 
 
@@ -120,8 +138,8 @@ webserver_tls_cloudflare_token: "{{ vault_cloudflare_token }}"
 ```
 
 The vhost emits `http2 on;` or the older `listen ... ssl http2` form depending on the
-installed nginx version — the standalone directive only exists from nginx 1.25.1, and
-Ubuntu 24.04 ships 1.24.
+installed nginx version — the standalone directive only exists from nginx 1.25.1, so
+24.04 (nginx 1.24) gets the listen-parameter form and 26.04 (nginx 1.28) the modern one.
 
 Set `webserver_tls_staging: true` while testing. It issues an untrusted certificate
 from the Let's Encrypt staging CA, which has far looser rate limits than production
@@ -212,10 +230,11 @@ ansible-lint && yamllint .
 Two GitHub Actions workflows run on every push and pull request:
 
 - **Lint** — `yamllint` and `ansible-lint` at the `production` profile.
-- **Integration** — deploys the full stack and runs `tests/verify.yml`. The runner is
-  itself Ubuntu 24.04 with systemd, so the playbook runs against it directly rather
-  than against a container; that avoids the systemd-in-Docker workarounds that would
-  otherwise mask real problems with the timers and services this role installs.
+- **Integration** — deploys the full stack and runs `tests/verify.yml`, as a matrix over
+  Ubuntu 24.04 and 26.04. Both legs block. The runners are themselves the target OS with
+  systemd, so the playbook runs against them directly rather than against a container;
+  that avoids the systemd-in-Docker workarounds that would otherwise mask real problems
+  with the timers and services this role installs.
 
 The integration job runs the playbook **twice** and fails if the second run reports any
 changes. That assertion is the one most likely to catch a regression, because a

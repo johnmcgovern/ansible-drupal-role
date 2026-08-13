@@ -21,21 +21,21 @@ jobs:
     name: Deploy and verify on ${{ matrix.release }}
     runs-on: ${{ matrix.image }}
 
-    # 26.04 is informational: it must not block a merge while it is still being
-    # brought up. continue-on-error makes the job report failure without failing
-    # the workflow; fail-fast is off so a 26.04 failure cannot cancel 24.04.
+    # Both releases are supported, so both block. The flag is kept so a future
+    # release can be added as non-blocking while it is brought up: set
+    # experimental: true and drop it from common_tested_releases.
     continue-on-error: ${{ matrix.experimental }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - release: Ubuntu 24.04 (tested)
+          - release: Ubuntu 24.04
             image: ubuntu-24.04
             experimental: false
-          - release: Ubuntu 26.04 (experimental)
+          - release: Ubuntu 26.04
             image: ubuntu-26.04
-            experimental: true
+            experimental: false
 
     timeout-minutes: 30
 

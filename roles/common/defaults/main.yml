@@ -1,15 +1,15 @@
 ---
-# Ubuntu releases these roles will deploy to. noble is the tested target;
-# resolute (26.04 LTS) is accepted so it can be exercised in CI, but it moves to
-# PHP 8.5 and MariaDB 11.8 and has not been proven yet.
+# Ubuntu releases these roles will deploy to.
 common_supported_releases:
-  - noble      # 24.04 LTS
-  - resolute   # 26.04 LTS -- experimental
+  - noble      # 24.04 LTS -- PHP 8.3, MariaDB 10.11
+  - resolute   # 26.04 LTS -- PHP 8.5, MariaDB 11.8
 
-# Releases that are actually covered by a green CI run. Anything supported but
-# not listed here produces a warning at the start of the play.
+# Releases covered by a green integration run in CI. Anything supported but not
+# listed here warns at the start of the play. Both entries are blocking legs of
+# the integration workflow, so this list and CI cannot drift apart silently.
 common_tested_releases:
   - noble
+  - resolute
 
 # Web server run-as identity. Ubuntu's nginx package runs as www-data and
 # creates this user/group itself.
