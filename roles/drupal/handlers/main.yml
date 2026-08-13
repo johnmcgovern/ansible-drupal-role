@@ -23,11 +23,31 @@
   changed_when: true
   when: "'Successful' in (drupal_bootstrap.stdout | default(''))"
 
+# A fresh install has no update data until the update module has fetched the
+# release history from drupal.org, so the status report shows "There was a
+# problem checking available updates" for core and for contrib until then --
+# which reads like a failure but is only an empty cache. Fetching it here means
+# a first deploy lands on a genuinely clean status report. Notified rather than
+# unconditional: it is a network call, so it should only run when the site or
+# its module set actually changed.
+- name: Refresh Drupal update data
+  ansible.builtin.command:
+    cmd: "{{ drupal_drush }} php:eval \"\\Drupal::service('update.manager')->refreshUpdateData();\""
+    chdir: "{{ drupal_base_path }}"
+  become: true
+  become_user: "{{ webserver_user }}"
+  environment: "{{ drupal_drush_env }}"
+  changed_when: true
+
 # NOTE: handlers run in the order they are defined here, not the order they are
-# notified. Cron is first so that anything it writes is covered by the ownership
-# handlers below. It runs as the web server account, as does the systemd timer,
-# because bootstrapping Drupal as root leaves a root-owned twig cache under
-# sites/default/files that the web server cannot then rewrite.
+# notified, and this order is load bearing. Cron must follow the update-data
+# refresh above, because refreshUpdateData() only queues the fetch tasks and it
+# is cron that drains that queue -- run the other way round, core's update status
+# stays unknown until the next deploy. Cron must in turn precede the ownership
+# handlers so anything it writes is covered by them. It runs as the web server
+# account, as does the systemd timer, because bootstrapping Drupal as root
+# leaves a root-owned twig cache under sites/default/files that the web server
+# cannot then rewrite.
 - name: Run Drupal cron
   ansible.builtin.command:
     cmd: "{{ drupal_drush }} cron"

@@ -11,9 +11,34 @@
       Apache support has been removed; these roles install nginx only.
       Remove webserver_type from your variables, or set it to 'nginx'.
 
+# OPcache ships as a separate php-opcache package through PHP 8.4. Ubuntu 26.04
+# (PHP 8.5) has no such package, and naming it aborts the whole apt transaction.
+# Detected rather than keyed off the release name, so a future release that
+# brings it back, or drops another optional package, needs no change here.
+- name: Check which optional PHP packages this release provides
+  ansible.builtin.command:
+    cmd: "apt-cache policy {{ item }}"
+  register: php_optional_policy
+  changed_when: false
+  loop: "{{ php_packages_optional }}"
+
+- name: Register the optional PHP packages that are installable
+  ansible.builtin.set_fact:
+    php_packages_available: >-
+      {{ php_optional_policy.results
+         | selectattr('stdout', 'search', 'Candidate:\s*(?!\(none\))\S')
+         | map(attribute='item') | list }}
+
+- name: Report optional PHP packages this release does not provide
+  ansible.builtin.debug:
+    msg: >-
+      Not available on {{ ansible_distribution_release }}, skipping:
+      {{ php_packages_optional | difference(php_packages_available) | join(', ') }}
+  when: (php_packages_optional | difference(php_packages_available)) | length > 0
+
 - name: Install PHP and PHP modules
   ansible.builtin.apt:
-    name: "{{ php_packages }}"
+    name: "{{ php_packages + php_packages_available }}"
     state: present
 
 # Everything downstream (the FPM socket path, the service name, the systemd

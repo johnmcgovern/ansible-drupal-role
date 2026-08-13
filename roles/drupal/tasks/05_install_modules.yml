@@ -49,4 +49,6 @@
   loop: "{{ drupal_enable_modules }}"
   when: item not in (drupal_enabled_modules.stdout | from_json)
   changed_when: true
-  notify: Run Drupal cron
+  notify:
+    - Run Drupal cron
+    - Refresh Drupal update data

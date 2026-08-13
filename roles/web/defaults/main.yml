@@ -152,7 +152,12 @@ php_packages:
   - php-gd
   - php-mbstring
   - php-mysql
-  - php-opcache
   - php-uploadprogress
   - php-xml
   - php-zip
+
+# Installed only where apt actually offers them. php-opcache exists through PHP
+# 8.4 but not in Ubuntu 26.04's PHP 8.5, and naming a missing package aborts the
+# entire apt transaction rather than just skipping it.
+php_packages_optional:
+  - php-opcache

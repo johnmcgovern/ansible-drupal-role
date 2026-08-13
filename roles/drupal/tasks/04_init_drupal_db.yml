@@ -36,3 +36,4 @@
     - Reset Drupal file ownership
     - Restore Drupal writable directories
     - Run Drupal cron
+    - Refresh Drupal update data
