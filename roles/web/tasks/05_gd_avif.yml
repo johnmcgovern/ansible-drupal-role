@@ -46,7 +46,7 @@
           php_gd_avif_build is enabled. This compiles a private libgd and PHP gd
           extension under {{ php_gd_avif_prefix }}, replacing the distribution
           gd module for PHP only. Ubuntu does not support this configuration
-          (LP#2031934) and will not ship a fix for 24.04. You are taking on
+          (LP#2031934) and will not ship a fix for a released version. You are taking on
           responsibility for rebuilding after PHP upgrades, and for tracking
           libgd and libavif security advisories yourself, because apt no longer
           does it for the copy PHP loads.

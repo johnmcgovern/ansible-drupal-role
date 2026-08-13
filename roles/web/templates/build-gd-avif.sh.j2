@@ -1,7 +1,8 @@
 #!/bin/bash
 # {{ ansible_managed }}
 #
-# Builds an AVIF-capable PHP GD extension for Ubuntu 24.04.
+# Builds an AVIF-capable PHP GD extension. Applies to every Ubuntu release
+# these roles support: 26.04's libgd3 is no more AVIF-capable than 24.04's.
 #
 # Ubuntu deliberately builds libgd2 without libavif: libgd2 lives in main,
 # libavif's Rust dependency tree keeps it in universe, and main packages may not
