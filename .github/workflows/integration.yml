@@ -50,10 +50,25 @@ jobs:
       - name: Remove conflicting preinstalled services
         run: |
           sudo systemctl stop mysql apache2 2>/dev/null || true
-          sudo apt-get purge -y -qq \
-            'mysql-server*' 'mysql-client*' 'mysql-community*' \
-            'libmysqlclient*' apache2 2>/dev/null || true
-          sudo apt-get autoremove --purge -y -qq 2>/dev/null || true
+
+          # Purge only what is actually installed. apt-get purge is
+          # all-or-nothing: naming a package that is absent (apache2 is not on
+          # this image) makes it exit non-zero having removed nothing, which a
+          # trailing `|| true` then hides.
+          installed=$(dpkg-query -W -f='${Package} ${Status}\n' 2>/dev/null \
+            | awk '$NF == "installed" { print $1 }' \
+            | grep -E '^(mysql-server|mysql-client|mysql-community|libmysqlclient|apache2)' \
+            | grep -vx 'mysql-common' || true)
+
+          if [ -n "${installed}" ]; then
+            echo "purging: ${installed}"
+            # shellcheck disable=SC2086
+            sudo apt-get purge -y -qq ${installed}
+            sudo apt-get autoremove --purge -y -qq
+          else
+            echo "nothing to purge"
+          fi
+
           echo "listening on :80 ->"
           sudo ss -lntp | grep ':80 ' || echo "  nothing (good)"
           echo "MySQL-variant packages remaining (mysql-common is a MariaDB dep) ->"
