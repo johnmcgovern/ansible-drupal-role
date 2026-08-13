@@ -4,12 +4,27 @@
   ansible.builtin.assert:
     that:
       - ansible_distribution == 'Ubuntu'
-      - ansible_distribution_release == 'noble'
+      - ansible_distribution_release in common_supported_releases
     fail_msg: >-
-      This role supports Ubuntu 24.04 LTS (noble) only. Detected
-      {{ ansible_distribution }} {{ ansible_distribution_version }}
+      This role supports Ubuntu {{ common_supported_releases | join(', ') }} only.
+      Detected {{ ansible_distribution }} {{ ansible_distribution_version }}
       ({{ ansible_distribution_release }}).
-    success_msg: "Ubuntu 24.04 LTS (noble) detected."
+    success_msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_version }}
+      ({{ ansible_distribution_release }}) detected.
+
+# 26.04 moves to PHP 8.5 and MariaDB 11.8. Nothing here pins either version --
+# the PHP version is discovered at runtime -- but Drupal 11 only recommends up
+# to PHP 8.4, so this is worth stating plainly rather than letting a deploy
+# imply the combination is supported.
+- name: Warn when running on a release that is supported but not yet proven
+  ansible.builtin.debug:
+    msg: >-
+      {{ ansible_distribution_release }} is EXPERIMENTAL for these roles.
+      Ubuntu 24.04 (noble) is the tested target. Drupal 11 recommends PHP 8.4;
+      {{ ansible_distribution_release }} ships PHP 8.5, which Drupal core
+      supports from 11.3 but which contributed modules may not.
+  when: ansible_distribution_release not in common_tested_releases
 
 # Refreshing the package index is not a change to system state, so it is not
 # reported as one. Otherwise every run made more than cache_valid_time after the

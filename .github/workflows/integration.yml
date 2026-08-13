@@ -13,10 +13,30 @@ concurrency:
   group: integration-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
-    name: Deploy and verify on Ubuntu 24.04
-    runs-on: ubuntu-24.04
+    name: Deploy and verify on ${{ matrix.release }}
+    runs-on: ${{ matrix.image }}
+
+    # 26.04 is informational: it must not block a merge while it is still being
+    # brought up. continue-on-error makes the job report failure without failing
+    # the workflow; fail-fast is off so a 26.04 failure cannot cancel 24.04.
+    continue-on-error: ${{ matrix.experimental }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - release: Ubuntu 24.04 (tested)
+            image: ubuntu-24.04
+            experimental: false
+          - release: Ubuntu 26.04 (experimental)
+            image: ubuntu-26.04
+            experimental: true
+
     timeout-minutes: 30
 
     # pipefail matters here: steps below pipe ansible-playbook into tee, and
@@ -27,6 +47,14 @@ jobs:
         shell: bash -euo pipefail {0}
 
     steps:
+      - name: Report the target OS
+        run: |
+          . /etc/os-release
+          echo "target: ${PRETTY_NAME}"
+          echo "php candidate:     $(apt-cache policy php-cli 2>/dev/null | awk '/Candidate/{print $2}')"
+          echo "mariadb candidate: $(apt-cache policy mariadb-server 2>/dev/null | awk '/Candidate/{print $2}')"
+          echo "nginx candidate:   $(apt-cache policy nginx 2>/dev/null | awk '/Candidate/{print $2}')"
+
       - name: Check out the repository
         uses: actions/checkout@v7
 

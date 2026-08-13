@@ -127,10 +127,15 @@ php_gd_avif_src_dir: /usr/local/src/gd-avif
 php_gd_avif_build_rev: 1
 
 php_gd_avif_apt_mirror: http://archive.ubuntu.com/ubuntu
+
+# Derived from the running release rather than hardcoded. With 'noble' pinned
+# here, a 26.04 host would add noble deb-src entries and rebuild libgd from
+# 24.04 sources against 26.04 libraries -- which mostly works, right up until it
+# does not.
 php_gd_avif_apt_suites:
-  - noble
-  - noble-updates
-  - noble-security
+  - "{{ ansible_distribution_release }}"
+  - "{{ ansible_distribution_release }}-updates"
+  - "{{ ansible_distribution_release }}-security"
 
 # PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache.
 # php-uploadprogress ships in the noble universe component, so no third-party
