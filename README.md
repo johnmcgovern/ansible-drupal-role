@@ -378,7 +378,9 @@ by default are handled:
   libgd has AVIF enabled; this is Ubuntu-specific. Neither Ubuntu's `php8.3-gd` nor
   the ondrej PPA build contains AVIF support (verified by inspecting both binaries).
   Rebuilding libgd + ext/gd locally works but means privately maintaining two
-  security-sensitive libraries that apt will silently revert on upgrade. If AVIF
+  security-sensitive libraries. `php_gd_avif_build` does exactly that, opt-in and
+  off by default; if you enable it, schedule a periodic playbook run, because the
+  rebuild that recovers from a PHP ABI change only happens on a run. If AVIF
   image derivatives are actually needed, use `php-imagick` with the ImageMagick
   toolkit contrib module (the path Drupal's own
   [AVIF issue](https://www.drupal.org/project/drupal/issues/3202016) endorses), or

@@ -115,6 +115,11 @@ php_fpm_pool_settings:
 #     and the next playbook run.
 #   - Roughly 250 MB of build tooling is installed on the target and stays.
 #
+# Both risks are bounded by how often this playbook runs, because the rebuild
+# only happens on a run. Schedule one so an ABI change is picked up in hours
+# rather than whenever someone next deploys by hand. Nothing will alert you to a
+# libgd or libavif advisory affecting this build; apt is not tracking it.
+#
 # If you only need AVIF derivatives and not a clean status page, php-imagick
 # with the ImageMagick toolkit module is the supported alternative and needs
 # none of this.
@@ -138,8 +143,8 @@ php_gd_avif_apt_suites:
   - "{{ ansible_distribution_release }}-security"
 
 # PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache.
-# php-uploadprogress ships in the noble universe component, so no third-party
-# PPA is required on 24.04.
+# php-uploadprogress ships in the universe component on both supported
+# releases, so no third-party PPA is required.
 #
 # NOTE: the bare `php` metapackage is deliberately NOT listed. It depends on
 # php8.3, whose first Depends alternative is libapache2-mod-php8.3, so apt would

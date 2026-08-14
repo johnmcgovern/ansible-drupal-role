@@ -10,6 +10,10 @@
 
 ansible_user: username
 
+# Only needed when the key is not one SSH would find on its own (no ~/.ssh/config
+# entry and not a default filename such as ~/.ssh/id_ed25519).
+# ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+
 
 #
 # Web server
@@ -24,7 +28,10 @@ webserver_max_body_size: 64M
 # that resolves to this server, with port 80 reachable from the internet for
 # the ACME HTTP-01 challenge. Enabling this redirects all HTTP to HTTPS.
 webserver_tls_enabled: false
-webserver_tls_email: example@example.com
+
+# Address Let's Encrypt registers and sends expiry notices to. Defaults to
+# webserver_email, so set it only if they should differ.
+# webserver_tls_email: certs@example.com
 
 # http-01 (default) serves a challenge file over port 80 and needs the host to
 # be reachable from the internet. dns-01 writes a TXT record through the
@@ -68,17 +75,26 @@ php_apcu_shm_size: 64M
 # AVIF support in GD -- OPT IN, DISABLED BY DEFAULT.
 #
 # Ubuntu ships libgd2 without libavif deliberately (LP#2031934) and will not fix
-# it for 24.04, so Drupal 11.2+ reports a GD status page warning that cannot be
-# cleared with distribution packages. Setting this true compiles a private libgd
-# and PHP gd extension under /opt/gd-avif and points PHP at them. The system
-# libgd3 is left alone and stays managed by apt.
+# it for a released version -- true of 24.04 and 26.04 alike -- so Drupal 11.2+
+# reports a GD status page warning that cannot be cleared with distribution
+# packages. Setting this true compiles a private libgd and PHP gd extension
+# under /opt/gd-avif and points PHP at them. The system libgd3 is left alone and
+# stays managed by apt.
 #
 # WARNING -- what you take on by enabling it:
 #   * libgd and libavif security updates no longer reach the copy PHP loads.
+#     apt will keep patching the system libgd3; it will not touch this build.
 #   * A PHP upgrade that changes the extension ABI requires a rebuild. The
 #     build stamp detects it, but the site runs without GD in the meantime.
 #   * ~250 MB of build tooling is installed on the target and stays there.
 #   * Ubuntu does not support this configuration.
+#
+# MITIGATION: both risks are bounded by how often this playbook runs, because
+# the rebuild only happens on a run. Schedule one (a systemd timer or cron entry
+# invoking ansible-pull, or whatever drives your deploys) so an ABI change is
+# picked up in hours rather than whenever someone next deploys by hand, and so
+# you find out promptly when a rebuild is due. Watch libgd and libavif
+# advisories yourself; apt will not tell you.
 #
 # If you only need AVIF derivatives and not a clean status page, php-imagick
 # with the ImageMagick toolkit module is the supported alternative.
