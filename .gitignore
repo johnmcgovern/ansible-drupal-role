@@ -110,3 +110,6 @@ venv.bak/
 group_vars/all
 hosts
 site.retry
+
+# Session handoff notes: internal hostnames, not project documentation
+HANDOFF.md
