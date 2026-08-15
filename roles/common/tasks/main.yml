@@ -6,21 +6,21 @@
 - name: Identify the running platform
   ansible.builtin.set_fact:
     common_platform: >-
-      {{ ansible_distribution_release if ansible_os_family == 'Debian'
-         else (ansible_distribution | lower | replace(' ', '')
-               ~ ansible_distribution_major_version) }}
+      {{ ansible_facts['distribution_release'] if ansible_facts['os_family'] == 'Debian'
+         else (ansible_facts['distribution'] | lower | replace(' ', '')
+               ~ ansible_facts['distribution_major_version']) }}
 
 - name: Assert the target is a supported OS
   ansible.builtin.assert:
     that:
-      - ansible_os_family in ['Debian', 'RedHat']
+      - ansible_facts['os_family'] in ['Debian', 'RedHat']
       - common_platform in common_supported_releases
     fail_msg: >-
       These roles support {{ common_supported_releases | join(', ') }} only.
-      Detected {{ ansible_distribution }} {{ ansible_distribution_version }}
+      Detected {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
       (identified as "{{ common_platform }}").
     success_msg: >-
-      {{ ansible_distribution }} {{ ansible_distribution_version }}
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
       (identified as "{{ common_platform }}") detected.
 
 # Ubuntu 26.04 moves to PHP 8.5 and MariaDB 11.8; RHEL 9 has no CI runner at
@@ -32,10 +32,10 @@
     msg: >-
       {{ common_platform }} is EXPERIMENTAL for these roles: it has no blocking
       CI leg, so it is validated by hand rather than on every push.
-      {{ 'Drupal 11 recommends PHP 8.4; ' ~ ansible_distribution_release
+      {{ 'Drupal 11 recommends PHP 8.4; ' ~ ansible_facts['distribution_release']
          ~ ' ships PHP 8.5, which Drupal core supports from 11.3 but which
          contributed modules may not.'
-         if ansible_os_family == 'Debian'
+         if ansible_facts['os_family'] == 'Debian'
          else 'PHP, MariaDB and nginx all come from AppStream module streams
          that roles/web and roles/db enable explicitly, because the non-modular
          defaults (PHP 8.0, MariaDB 10.5) are too old for Drupal 11.' }}
@@ -49,13 +49,13 @@
     update_cache: true
     cache_valid_time: 3600
   changed_when: false
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
 
 - name: Install common packages
   ansible.builtin.apt:
     name: "{{ common_packages }}"
     state: present
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
 
 # dnf refreshes metadata on its own schedule, so there is no separate cache task
 # to keep out of the change count.
@@ -63,7 +63,7 @@
   ansible.builtin.dnf:
     name: "{{ common_packages + common_packages_redhat }}"
     state: present
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts['os_family'] == 'RedHat'
 
 # The nginx package creates its own run-as account -- www-data on Debian, nginx
 # on Red Hat -- but roles/common runs before roles/web installs it. We only

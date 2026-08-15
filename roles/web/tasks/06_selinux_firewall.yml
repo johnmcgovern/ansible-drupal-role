@@ -10,7 +10,7 @@
 - name: Configure SELinux for the Drupal stack
   when:
     - webserver_selinux_manage
-    - ansible_selinux.status | default('disabled') == 'enabled'
+    - ansible_facts['selinux'].status | default('disabled') == 'enabled'
   block:
 
     # PHP-FPM runs in httpd_t and reaches MariaDB over a local unix socket. The

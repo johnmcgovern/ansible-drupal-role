@@ -8,7 +8,7 @@
 # roles/web uses for php and nginx; kept here rather than shared because the db
 # role has to work when it runs against a host the web role never touches.
 - name: Enable the required DNF module streams
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts['os_family'] == 'RedHat'
   block:
 
     - name: Read the currently enabled DNF module streams
@@ -39,7 +39,7 @@
     name: "{{ db_packages }}"
     state: present
     install_recommends: false
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
 
 # dnf has no install_recommends equivalent to switch off, and Red Hat's
 # mariadb-server has no weak dependency on an Oracle client library to avoid.
@@ -50,7 +50,7 @@
   ansible.builtin.dnf:
     name: "{{ db_packages }}"
     state: present
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts['os_family'] == 'RedHat'
 
 # Ubuntu 24.04 marks the system Python as externally managed (PEP 668), so
 # `pip install PyMySQL` is refused, and RHEL 9's system Python is 3.9 with no
@@ -60,13 +60,13 @@
   ansible.builtin.apt:
     name: "{{ db_python_mysql_package }}"
     state: present
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
 
 - name: Install the Python MySQL client library
   ansible.builtin.dnf:
     name: "{{ db_python_mysql_package }}"
     state: present
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts['os_family'] == 'RedHat'
 
 # A drop-in rather than edits to the packaged server config, so a package
 # upgrade cannot revert it or raise a conffile prompt. Files load in name order,

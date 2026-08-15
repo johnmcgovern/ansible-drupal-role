@@ -12,8 +12,8 @@ drupal_version: ""
 # Mirrors roles/common/defaults. Role defaults do not carry across plays, and
 # the drupal role runs in its own play, so the OS-derived identity is repeated
 # rather than inherited.
-webserver_user: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
-webserver_group: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
+webserver_user: "{{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }}"
+webserver_group: "{{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }}"
 
 drupal_sitename: Drupal Site
 drupal_email: admin@example.com

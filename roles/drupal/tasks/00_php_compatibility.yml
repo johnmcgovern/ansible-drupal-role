@@ -47,7 +47,7 @@
       {{ drupal_php_majors_ok | max }}.x. Drupal
       {{ drupal_php_majors_known | max }} requires PHP
       {{ drupal_php_requirements[(drupal_php_majors_known | max) | string] }}, which
-      {{ ansible_distribution }} {{ ansible_distribution_major_version }} does not
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_major_version'] }} does not
       ship. Installs and upgrades will stay on Drupal
       {{ drupal_php_majors_ok | max }}.x -- Composer picks the newest release
       this PHP can satisfy, so nothing will fail, it will simply never move to

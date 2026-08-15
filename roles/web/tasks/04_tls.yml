@@ -18,7 +18,7 @@
       EPEL and names its renewal timer differently, and shipping that path
       without a way to test it is how untested code reaches production.
       Terminate TLS in front of this host, or set webserver_tls_enabled: false.
-  when: ansible_os_family != 'Debian'
+  when: ansible_facts['os_family'] != 'Debian'
 
 - name: Assert the TLS settings are usable
   ansible.builtin.assert:

@@ -79,9 +79,9 @@
 # rules existed would otherwise keep the type it inherited at the time.
 - name: Apply the SELinux file contexts to the Drupal tree
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts['os_family'] == 'RedHat'
     - drupal_selinux_relabel
-    - ansible_selinux.status | default('disabled') == 'enabled'
+    - ansible_facts['selinux'].status | default('disabled') == 'enabled'
   block:
 
     # restorecon has no check mode and always exits 0, so the only way to know

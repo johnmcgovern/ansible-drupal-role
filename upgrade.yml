@@ -35,10 +35,10 @@
     # below runs as a user that does not exist on a Red Hat host.
     upgrade_web_user: >-
       {{ webserver_user
-         | default('nginx' if ansible_os_family == 'RedHat' else 'www-data') }}
+         | default('nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data') }}
     upgrade_web_group: >-
       {{ webserver_group
-         | default('nginx' if ansible_os_family == 'RedHat' else 'www-data') }}
+         | default('nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data') }}
     upgrade_config_sync: "{{ drupal_config_sync_path | default(upgrade_base_path ~ '/config/sync') }}"
     upgrade_composer_env:
       COMPOSER_HOME: /root/.composer

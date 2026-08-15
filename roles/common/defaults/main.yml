@@ -24,8 +24,8 @@ common_tested_releases:
 # package runs as www-data, Red Hat's as nginx. Both packages create the account
 # themselves. Derived rather than hardcoded so a host does not have to state it,
 # and left as a default so group_vars can still override it.
-webserver_user: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
-webserver_group: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
+webserver_user: "{{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }}"
+webserver_group: "{{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }}"
 
 # Packages needed by later roles (Composer needs unzip/git, the MySQL modules
 # need PyMySQL, which is installed by the db role). Every name here happens to

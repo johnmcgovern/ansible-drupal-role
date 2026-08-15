@@ -1,8 +1,8 @@
 ---
 # Mirrors roles/common/defaults. Role defaults do not carry across plays, so the
 # OS-derived identity has to be repeated rather than inherited.
-webserver_user: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
-webserver_group: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
+webserver_user: "{{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }}"
+webserver_group: "{{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }}"
 
 # Docroot the vhost points at. Must match roles/drupal drupal_base_path.
 drupal_base_path: /var/www/drupal
@@ -28,15 +28,15 @@ webserver_max_body_size: 64M
 #           unmatched Host header to Drupal and the packaged block is
 #           unreachable.
 webserver_vhost_path: >-
-  {{ '/etc/nginx/conf.d/drupal.conf' if ansible_os_family == 'RedHat'
+  {{ '/etc/nginx/conf.d/drupal.conf' if ansible_facts['os_family'] == 'RedHat'
      else '/etc/nginx/sites-available/drupal' }}
 
 # Empty where the distribution has no enabled/available split.
 webserver_vhost_link: >-
-  {{ '' if ansible_os_family == 'RedHat' else '/etc/nginx/sites-enabled/drupal' }}
+  {{ '' if ansible_facts['os_family'] == 'RedHat' else '/etc/nginx/sites-enabled/drupal' }}
 
 webserver_default_site: >-
-  {{ '' if ansible_os_family == 'RedHat' else '/etc/nginx/sites-enabled/default' }}
+  {{ '' if ansible_facts['os_family'] == 'RedHat' else '/etc/nginx/sites-enabled/default' }}
 
 
 #
@@ -135,7 +135,7 @@ php_fpm_pool_settings:
 # directory and Drupal fails at its first cache write. Set every one of these
 # rather than only user/group, or the socket ACL keeps naming the old account.
 php_fpm_pool_identity: >-
-  {{ php_fpm_pool_identity_redhat if ansible_os_family == 'RedHat' else {} }}
+  {{ php_fpm_pool_identity_redhat if ansible_facts['os_family'] == 'RedHat' else {} }}
 
 php_fpm_pool_identity_redhat:
   user: "{{ webserver_user }}"
@@ -257,15 +257,15 @@ php_gd_avif_apt_mirror: http://archive.ubuntu.com/ubuntu
 # 24.04 sources against 26.04 libraries -- which mostly works, right up until it
 # does not.
 php_gd_avif_apt_suites:
-  - "{{ ansible_distribution_release }}"
-  - "{{ ansible_distribution_release }}-updates"
-  - "{{ ansible_distribution_release }}-security"
+  - "{{ ansible_facts['distribution_release'] }}"
+  - "{{ ansible_facts['distribution_release'] }}-updates"
+  - "{{ ansible_facts['distribution_release'] }}-security"
 
 # PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache. The
 # two distributions name almost none of them the same way, so the list is picked
 # by OS family rather than papered over with a translation table.
 php_packages: >-
-  {{ php_packages_redhat if ansible_os_family == 'RedHat' else php_packages_debian }}
+  {{ php_packages_redhat if ansible_facts['os_family'] == 'RedHat' else php_packages_debian }}
 
 # php-uploadprogress ships in the universe component on both supported Ubuntu
 # releases, so no third-party PPA is required.
@@ -310,7 +310,7 @@ php_packages_redhat:
 #                           does not require it, so RHEL simply goes without and
 #                           the run says so.
 php_packages_optional: >-
-  {{ php_packages_optional_redhat if ansible_os_family == 'RedHat'
+  {{ php_packages_optional_redhat if ansible_facts['os_family'] == 'RedHat'
      else php_packages_optional_debian }}
 
 php_packages_optional_debian:

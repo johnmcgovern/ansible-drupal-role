@@ -21,7 +21,7 @@
     # below pass vacuously on the other platform.
     verify_webserver_user: >-
       {{ webserver_user
-         | default('nginx' if ansible_os_family == 'RedHat' else 'www-data') }}
+         | default('nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data') }}
     verify_sitename: "{{ webserver_sitename | default('127.0.0.1') }}"
     verify_max_body_size: "{{ webserver_max_body_size | default('64M') }}"
     verify_memory_limit: "{{ php_memory_limit | default('256M') }}"
@@ -174,7 +174,7 @@
         executable: /bin/bash
       register: verify_mysql_variants_deb
       changed_when: false
-      when: ansible_os_family == 'Debian'
+      when: ansible_facts['os_family'] == 'Debian'
 
     - name: List installed packages from other MySQL variants
       ansible.builtin.shell:
@@ -186,12 +186,12 @@
         executable: /bin/bash
       register: verify_mysql_variants_rpm
       changed_when: false
-      when: ansible_os_family == 'RedHat'
+      when: ansible_facts['os_family'] == 'RedHat'
 
     - name: Register the MySQL variant packages found
       ansible.builtin.set_fact:
         verify_mysql_variants: >-
-          {{ verify_mysql_variants_rpm if ansible_os_family == 'RedHat'
+          {{ verify_mysql_variants_rpm if ansible_facts['os_family'] == 'RedHat'
              else verify_mysql_variants_deb }}
 
     - name: Assert no MySQL or Percona packages are installed
@@ -218,13 +218,13 @@
     - name: Derive the platform's PHP-FPM service, socket and binary
       ansible.builtin.set_fact:
         verify_fpm_service: >-
-          {{ 'php-fpm.service' if ansible_os_family == 'RedHat'
+          {{ 'php-fpm.service' if ansible_facts['os_family'] == 'RedHat'
              else 'php' ~ (verify_php_version.stdout | trim) ~ '-fpm.service' }}
         verify_fpm_socket: >-
-          {{ '/run/php-fpm/www.sock' if ansible_os_family == 'RedHat'
+          {{ '/run/php-fpm/www.sock' if ansible_facts['os_family'] == 'RedHat'
              else '/run/php/php' ~ (verify_php_version.stdout | trim) ~ '-fpm.sock' }}
         verify_fpm_binary: >-
-          {{ 'php-fpm' if ansible_os_family == 'RedHat'
+          {{ 'php-fpm' if ansible_facts['os_family'] == 'RedHat'
              else 'php-fpm' ~ (verify_php_version.stdout | trim) }}
 
     - name: Assert PHP-FPM is running
@@ -526,7 +526,7 @@
       changed_when: false
       failed_when: >-
         (verify_cron_last.stdout | trim | length) == 0
-        or ((ansible_date_time.epoch | int) - (verify_cron_last.stdout | trim | int)) > 86400
+        or ((ansible_facts['date_time'].epoch | int) - (verify_cron_last.stdout | trim | int)) > 86400
       when: verify_cron_enabled
 
     # Cron writing as root would leave files the web server cannot rewrite,
@@ -660,15 +660,15 @@
     #
 
     - name: Verify the SELinux configuration
-      when: ansible_selinux.status | default('disabled') == 'enabled'
+      when: ansible_facts['selinux'].status | default('disabled') == 'enabled'
       block:
 
         - name: Assert SELinux is enforcing, not merely enabled
           ansible.builtin.assert:
             that:
-              - ansible_selinux.mode == 'enforcing'
+              - ansible_facts['selinux'].mode == 'enforcing'
             fail_msg: >-
-              SELinux is in {{ ansible_selinux.mode }} mode, so every context
+              SELinux is in {{ ansible_facts['selinux'].mode }} mode, so every context
               assertion below would pass whether or not the labels are right.
 
         # Read with `stat -c %C` rather than the stat module: the module only
