@@ -64,8 +64,26 @@
     #
     # The same rule covers coverage_core, which Drupal raises to Error once the
     # installed minor's security coverage has actually ended.
+    # "Drupal core security coverage" appears on any site that is not on the
+    # newest minor. It is not a problem: it states the release after which the
+    # installed branch stops receiving security fixes, which is information, not
+    # a fault. Drupal's own escalation, from
+    # core/modules/update/src/ProjectSecurityRequirement.php, is exactly the
+    # distinction this playbook already draws:
+    #
+    #   Info     more than one further minor of coverage remains -- not even
+    #            reported at --severity=1, which is why a site on the current
+    #            minor never shows this item at all
+    #   Warning  one further minor remains ("Covered until 11.5.0")
+    #   Error    coverage has already ended
+    #
+    # So it is allowlisted as a warning and left to fail as an error, which is
+    # the whole point of splitting the two: a site deliberately running a
+    # supported older minor passes, and the same site fails the day that branch
+    # goes out of coverage.
     verify_status_allowed: >-
-      {{ ['Drupal core update status', 'Module and theme update status']
+      {{ ['Drupal core update status', 'Module and theme update status',
+          'Drupal core security coverage']
          + ([] if (php_gd_avif_build | default(false) | bool) else ['GD library']) }}
     verify_tls_staging: "{{ webserver_tls_staging | default(false) | bool }}"
     verify_gd_avif: "{{ php_gd_avif_build | default(false) | bool }}"
@@ -309,13 +327,15 @@
           {{ verify_status_raw | selectattr('sid', 'defined')
                                | selectattr('sid', 'ge', 2) | list }}
 
-    # Titles rather than whole records, because that is all the allowlist deals
-    # in. One record per title, so subtracting the error titles is exact.
-    - name: Reduce the warnings to their titles
+    # Whole records, not just titles, so the failure message can quote what
+    # Drupal actually reported -- "Deprecated modules found: History" is
+    # actionable in a way that the bare title is not.
+    - name: Collect the warnings that are not allowlisted
       ansible.builtin.set_fact:
-        verify_status_warning_titles: >-
-          {{ verify_status_items
-             | difference(verify_status_errors | map(attribute='title') | list) }}
+        verify_status_unexpected: >-
+          {{ verify_status_raw
+             | selectattr('sid', 'defined') | selectattr('sid', 'lt', 2)
+             | rejectattr('title', 'in', verify_status_allowed) | list }}
 
     - name: Report the Drupal status page state
       ansible.builtin.debug:
@@ -344,13 +364,25 @@
 
     # The allowlist is deliberately explicit rather than a blanket skip, so a
     # newly appearing warning fails the run instead of hiding behind a known one.
+    #
+    # The line it draws is whether the deployment can do anything about the
+    # item. GD/AVIF is a property of the distribution's libgd, the update-status
+    # items depend on drupal.org, and security coverage merely states a
+    # supported branch's end date -- none of those are fixable here. Anything
+    # else is, so it fails and says which. "Deprecated modules installed", for
+    # instance, appears after a cross-minor upgrade leaves a module enabled that
+    # a fresh install of the newer release would not have enabled, and the
+    # answer is to uninstall it rather than to widen this list.
     - name: Assert no unexpected status report warnings
       ansible.builtin.assert:
         that:
-          - verify_status_warning_titles | difference(verify_status_allowed) | length == 0
+          - verify_status_unexpected | length == 0
         fail_msg: >-
           Unexpected Drupal status report items:
-          {{ verify_status_warning_titles | difference(verify_status_allowed) | join(', ') }}
+          {{ verify_status_unexpected | map(attribute='title') | join(', ') }}
+          -- reported as:
+          {{ verify_status_unexpected | map(attribute='value')
+             | map('striptags') | map('trim') | join('; ') }}
         success_msg: >-
           {{ 'Status report clean.' if verify_status_items | length == 0
              else 'Only known-unfixable warnings remain: ' ~ (verify_status_items | join(', ')) }}

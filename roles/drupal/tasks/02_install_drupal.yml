@@ -1,5 +1,39 @@
 ---
 
+- name: Decide whether the requested Drupal version is a stable release
+  ansible.builtin.set_fact:
+    drupal_version_unstable: >-
+      {{ (drupal_version | default('') | length > 0)
+         and (drupal_version is search(drupal_unstable_pattern)) }}
+
+# Opting in has to be deliberate. Without this, a typo -- or a constraint copied
+# from a Drupal issue thread -- would silently install a development snapshot,
+# and the first sign of it would be a site that cannot be upgraded off the
+# branch it is on.
+- name: Fail when a development or pre-release Drupal is requested without opting in
+  ansible.builtin.fail:
+    msg: >-
+      drupal_version is "{{ drupal_version }}", which is a development or
+      pre-release version, but drupal_allow_unstable is false. Composer is run
+      with --stability stable and will not resolve it. Set
+      drupal_allow_unstable: true if that is genuinely what you want -- read
+      what it costs in roles/drupal/defaults/main.yml first -- or pin
+      drupal_version to a stable release.
+  when:
+    - drupal_version_unstable
+    - not drupal_allow_unstable
+
+- name: Warn that a development or pre-release Drupal is being installed
+  ansible.builtin.debug:
+    msg: >-
+      Installing Drupal {{ drupal_version }}, which is NOT a stable release.
+      Drupal does not support running a development branch: the code changes
+      underneath you, contributed modules may not work against it, and there is
+      no upgrade path off a dev snapshot short of reinstalling. Use this to find
+      out what a coming release does to this deployment, not to run anything
+      anyone depends on.
+  when: drupal_version_unstable
+
 - name: Check for an existing Drupal codebase
   ansible.builtin.stat:
     path: "{{ drupal_base_path }}/composer.json"
@@ -15,7 +49,8 @@
       {{ composer_bin }} create-project
       drupal/recommended-project{{ (':' ~ drupal_version) if drupal_version else '' }}
       {{ drupal_base_path | basename }}
-      --stability stable --no-interaction
+      --stability {{ 'dev' if drupal_allow_unstable else 'stable' }}
+      --no-interaction
     chdir: "{{ drupal_base_path | dirname }}"
   environment: "{{ drupal_composer_env }}"
   when: not drupal_composer_json.stat.exists

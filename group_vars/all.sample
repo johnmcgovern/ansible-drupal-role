@@ -158,6 +158,15 @@ drupal_base_path: /var/www/drupal
 # use upgrade.yml to move an installed site forward.
 drupal_version: ""
 
+# Permit a development or pre-release Drupal. Leave false unless you are
+# deliberately testing a coming release: Drupal does not support running a
+# development branch, and there is no upgrade path off a dev snapshot short of
+# reinstalling. With it true, drupal_version can be a pre-release or a branch --
+# "dev-main" is Drupal 12's development branch, which is how you find out what
+# the next major does to your deployment before it ships. Requires a platform
+# whose PHP is new enough for that branch.
+# drupal_allow_unstable: false
+
 drupal_sitename: Drupal Test Site
 drupal_email: example@example.com
 drupal_region: en

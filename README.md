@@ -397,6 +397,16 @@ the code with Composer, run `updatedb`, rebuild caches, leave maintenance mode. 
 which is why the outage is deliberate. The database step is wrapped so that a failure
 still takes the site back out of maintenance mode.
 
+Moving across a minor or major also reconciles `allow-plugins`. Composer refuses to run
+any plugin the project has not listed there, and that list is written once when
+`create-project` scaffolds the site — `composer require` never revisits it. So a release
+series that introduces a new plugin aborts the upgrade *after* rewriting `composer.json`,
+leaving the constraint pointing at a release that is not installed. Observed moving
+11.3.16 to `^11.4`, where 11.4's template adds `symfony/runtime`. The playbook fetches the
+target release's own template and permits whatever it declares that the project lacks,
+naming each one in the output; set `upgrade_sync_allow_plugins: false` to manage it by
+hand.
+
 The pre-upgrade backup is the rollback plan: Composer can be reverted from
 `composer.lock`, but a failed `updatedb` cannot be undone without the database.
 `drupal-restore.sh` restores exactly what it produces. Set `upgrade_backup: false` only
@@ -406,6 +416,29 @@ The playbook reports the version before and after, and asserts the site still bo
 afterwards. Re-running it when there is nothing to do reports
 `11.4.5 -> 11.4.5 (no change: already at the newest release allowed by composer.json)`.
 
+
+### Testing against an unreleased Drupal
+
+`drupal_allow_unstable: true` permits a development or pre-release Drupal, which is how
+you find out what a coming major does to a deployment before it ships. `drupal_version:
+dev-main` installs Drupal 12's development branch — `drupal/recommended-project:dev-main`
+requires `drupal/core-recommended:^12` — on any platform whose PHP is new enough, which
+today means Ubuntu 26.04 only.
+
+It is off by default and requesting a non-stable version without it fails with an
+explanation, so a constraint copied from an issue thread cannot quietly install a
+development snapshot. Drupal does not support running one: the code moves under you, and
+there is no upgrade path off it short of reinstalling.
+
+What a dry run of Drupal 12 currently shows, from a real deployment on 26.04:
+
+- Core installs, `site:install` completes, and the site serves — the roles need no change
+  for Drupal 12 itself.
+- Contributed modules are the blocker, as expected this far ahead of release:
+  `drupal/pathauto` and `drupal/ctools` still declare `drupal/core: ^8.8 || ^9`.
+- `tests/verify.yml` **fails**, correctly. A dev snapshot reports "Unsupported release" at
+  error severity, and errors are never allowlisted. A green verify on a development branch
+  would mean the check was not working.
 
 ### Testing
 

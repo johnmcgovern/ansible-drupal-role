@@ -9,6 +9,28 @@ drupal_base_path: /var/www/drupal
 # nothing. Use upgrade.yml to move an installed site forward.
 drupal_version: ""
 
+# Permit a development or pre-release Drupal. OFF by default, and it should stay
+# off for anything anyone depends on: Drupal does not support running a
+# development branch, the code changes under you, and there is no upgrade path
+# off a dev snapshot other than reinstalling.
+#
+# What it is for is testing these roles against the next major before it exists
+# as a release. "dev-main" is Drupal 12's development branch --
+# drupal/recommended-project:dev-main requires drupal/core-recommended:^12 --
+# so setting drupal_version to it answers in advance what December's release
+# will do here, on the one platform whose PHP is new enough to run it.
+#
+# Composer will not resolve a non-stable version at all unless the project's
+# stability allows it, so this flag switches create-project from
+# --stability stable to --stability dev. Nothing else about the deployment
+# changes.
+drupal_allow_unstable: false
+
+# Version strings that are not a stable release: dev-main, 12.0.x-dev, and the
+# alpha/beta/rc pre-releases. Used only to decide whether the flag above is
+# required, so that a typo in drupal_version is not mistaken for opting in.
+drupal_unstable_pattern: '^dev-|-dev$|-(alpha|beta|rc)'
+
 # Mirrors roles/common/defaults. Role defaults do not carry across plays, and
 # the drupal role runs in its own play, so the OS-derived identity is repeated
 # rather than inherited.

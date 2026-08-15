@@ -57,6 +57,21 @@
     # just taken one by hand.
     upgrade_backup: true
 
+    # Bring the project's allow-plugins list up to what the target release's
+    # own template declares, so that a series introducing a new Composer plugin
+    # does not abort the upgrade half-way. Only consulted when upgrade_target is
+    # set, because updating within existing constraints cannot change the
+    # template. Set false to manage composer.json by hand.
+    upgrade_sync_allow_plugins: true
+    upgrade_template_dir: /tmp/drupal-upgrade-template
+
+    # Permit upgrading onto a development or pre-release branch. Same meaning
+    # and the same warnings as drupal_allow_unstable in roles/drupal/defaults;
+    # defaults to whatever the host's configuration says so that one setting
+    # governs both playbooks.
+    upgrade_allow_unstable: "{{ drupal_allow_unstable | default(false) }}"
+    upgrade_unstable_pattern: '^dev-|-dev$|-(alpha|beta|rc)'
+
     # Maintenance mode during the database update. Turning this off shortens the
     # outage but serves requests against a partially migrated schema.
     upgrade_maintenance_mode: true
@@ -105,6 +120,21 @@
       when:
         - upgrade_target | length > 0
         - upgrade_target_major in upgrade_requirements
+
+    # Composer will not resolve a non-stable constraint unless the project's
+    # own minimum-stability allows it, so an upgrade onto a development branch
+    # needs both this opt-in and a project created with it.
+    - name: Fail when upgrading onto a development branch without opting in
+      ansible.builtin.fail:
+        msg: >-
+          upgrade_target is "{{ upgrade_target }}", which is a development or
+          pre-release constraint, but drupal_allow_unstable is false. Set it
+          true to allow this -- and read what it costs in
+          roles/drupal/defaults/main.yml -- or choose a stable constraint.
+      when:
+        - upgrade_target | length > 0
+        - upgrade_target is search(upgrade_unstable_pattern)
+        - not (upgrade_allow_unstable | bool)
 
     - name: Assert Drupal is installed on this host
       ansible.builtin.stat:
@@ -180,6 +210,86 @@
           environment: "{{ upgrade_composer_env }}"
           when: not upgrade_target
           changed_when: true
+
+        # A new release series can introduce Composer plugins the project has
+        # never seen, and Composer refuses to run any plugin absent from the
+        # project's allow-plugins list. That list is written once, when
+        # create-project scaffolds the site, and `composer require` never
+        # revisits it -- so the upgrade dies with
+        #
+        #   symfony/runtime contains a Composer plugin which is blocked by your
+        #   allow-plugins config
+        #
+        # *after* it has already rewritten composer.json, leaving the constraint
+        # pointing at a release that is not installed. Observed moving 11.3.16
+        # to ^11.4, where 11.4's template adds symfony/runtime.
+        #
+        # The target release's own template is the authority on what it needs,
+        # so it is fetched and compared rather than the missing names being
+        # hardcoded here -- a future release that adds a different plugin then
+        # needs no change. Permitting a plugin lets it execute code during
+        # install, so the ones being added are named in the output rather than
+        # slipped in quietly; set upgrade_sync_allow_plugins to false to manage
+        # the list by hand instead.
+        - name: Reconcile allow-plugins with the target release
+          when:
+            - upgrade_sync_allow_plugins
+            - upgrade_target | length > 0
+          block:
+
+            - name: Fetch the target release's project template
+              ansible.builtin.command:
+                cmd: >-
+                  {{ upgrade_composer }} create-project --no-install --no-scripts
+                  --stability {{ 'dev' if (upgrade_allow_unstable | bool) else 'stable' }}
+                  drupal/recommended-project:{{ upgrade_target }}
+                  {{ upgrade_template_dir }}
+                creates: "{{ upgrade_template_dir }}/composer.json"
+              environment: "{{ upgrade_composer_env }}"
+
+            - name: Read both manifests
+              ansible.builtin.slurp:
+                src: "{{ item }}"
+              register: upgrade_manifests
+              loop:
+                - "{{ upgrade_template_dir }}/composer.json"
+                - "{{ upgrade_base_path }}/composer.json"
+
+            - name: Work out which plugins the target release adds
+              ansible.builtin.set_fact:
+                upgrade_new_plugins: >-
+                  {{ (upgrade_target_plugins | list)
+                     | difference(upgrade_current_plugins | list) }}
+              vars:
+                upgrade_target_plugins: >-
+                  {{ (upgrade_manifests.results[0].content | b64decode | from_json).config['allow-plugins']
+                     | default({}) }}
+                upgrade_current_plugins: >-
+                  {{ (upgrade_manifests.results[1].content | b64decode | from_json).config['allow-plugins']
+                     | default({}) }}
+
+            - name: Report the Composer plugins being permitted
+              ansible.builtin.debug:
+                msg: >-
+                  Drupal {{ upgrade_target }} adds Composer
+                  plugin{{ 's' if upgrade_new_plugins | length > 1 else '' }}
+                  {{ upgrade_new_plugins | join(', ') }} to its project template.
+                  Permitting {{ 'them' if upgrade_new_plugins | length > 1 else 'it' }}
+                  in composer.json, without which the upgrade cannot install.
+              when: upgrade_new_plugins | length > 0
+
+            - name: Permit the Composer plugins the target release adds
+              ansible.builtin.command:
+                cmd: "{{ upgrade_composer }} config allow-plugins.{{ item }} true"
+                chdir: "{{ upgrade_base_path }}"
+              environment: "{{ upgrade_composer_env }}"
+              loop: "{{ upgrade_new_plugins }}"
+              changed_when: true
+
+            - name: Remove the fetched template
+              ansible.builtin.file:
+                path: "{{ upgrade_template_dir }}"
+                state: absent
 
         # Moving to a new minor or major means rewriting the core requirements,
         # not just updating within them. These three packages are what
