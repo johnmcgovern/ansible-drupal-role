@@ -63,6 +63,49 @@
 
   tasks:
 
+    # Read into its own namespace rather than injected: include_vars outranks
+    # group_vars, so pulling the whole file into scope would override a host's
+    # real configuration with role defaults. This way the Drupal/PHP requirement
+    # table has exactly one definition -- roles/drupal/defaults/main.yml -- and
+    # this playbook consults it instead of keeping a second copy to drift.
+    - name: Read the Drupal/PHP requirement table from the drupal role
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/roles/drupal/defaults/main.yml"
+        name: upgrade_role_defaults
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Determine the PHP version on this host
+      ansible.builtin.command:
+        cmd: php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
+      register: upgrade_php_probe
+      changed_when: false
+
+    # An upgrade_target names a release series deliberately, so a host that
+    # cannot run it should say which PHP it would need -- not hand back a
+    # Composer dependency-solver transcript that mentions php once, near the end.
+    - name: Assert this host's PHP can run the requested Drupal series
+      ansible.builtin.assert:
+        that:
+          - upgrade_requirements[upgrade_target_major] is version(upgrade_php, '<=')
+        fail_msg: >-
+          upgrade_target is "{{ upgrade_target }}", which is Drupal
+          {{ upgrade_target_major }} and requires PHP
+          {{ upgrade_requirements[upgrade_target_major] }}. This host has PHP
+          {{ upgrade_php }}, so Composer could not resolve it. Upgrade the
+          platform first, or choose a series this PHP can run.
+        success_msg: >-
+          PHP {{ upgrade_php }} satisfies Drupal {{ upgrade_target_major }}
+          (needs {{ upgrade_requirements[upgrade_target_major] }}).
+      vars:
+        upgrade_php: "{{ upgrade_php_probe.stdout | trim }}"
+        upgrade_requirements: "{{ upgrade_role_defaults.drupal_php_requirements }}"
+        upgrade_target_major: "{{ upgrade_target | regex_search('[0-9]+') }}"
+      when:
+        - upgrade_target | length > 0
+        - upgrade_target_major in upgrade_requirements
+
     - name: Assert Drupal is installed on this host
       ansible.builtin.stat:
         path: "{{ upgrade_base_path }}/composer.json"

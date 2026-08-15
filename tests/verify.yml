@@ -43,6 +43,27 @@
     # role refreshes update data and then runs cron to drain the queue, and
     # returns later. Asserting on it would make this test fail as a function of
     # elapsed time and drupal.org reachability, so it is reported but not fatal.
+    #
+    # IMPORTANT: this allowlist applies to WARNINGS ONLY. Error-severity items
+    # are never tolerated, whatever their title -- see the two assertions below.
+    # That distinction is what keeps these two entries from hiding a real
+    # problem, because Drupal reports both the harmless and the serious states
+    # under the same title. From
+    # core/modules/update/src/Hook/UpdateRequirements.php:
+    #
+    #   Error    "Not secure!"          the installed release has a known
+    #                                   security vulnerability
+    #   Error    "Revoked!"             the release was withdrawn
+    #   Error    "Unsupported release"  the branch no longer gets security fixes
+    #   Warning  "Out of date"          a newer release exists; not a security
+    #                                   matter, and failing on it would make
+    #                                   this test fail as a function of the
+    #                                   upstream release calendar
+    #   Warning  fetch-problem states   UNKNOWN / NOT_CHECKED / NOT_FETCHED /
+    #                                   FETCH_PENDING -- the flaky case above
+    #
+    # The same rule covers coverage_core, which Drupal raises to Error once the
+    # installed minor's security coverage has actually ended.
     verify_status_allowed: >-
       {{ ['Drupal core update status', 'Module and theme update status']
          + ([] if (php_gd_avif_build | default(false) | bool) else ['GD library']) }}
@@ -272,11 +293,29 @@
       changed_when: false
       failed_when: false
 
+    # Drush emits an empty JSON array rather than an object when nothing is
+    # outstanding, and .values() on a list is an error, hence the length guard.
+    # `sid` is the numeric severity: 2 is Error, 1 is Warning.
     - name: Collect the outstanding status report items
       ansible.builtin.set_fact:
-        verify_status_items: >-
-          {{ (verify_requirements.stdout | from_json).values() | map(attribute='title') | list
+        verify_status_raw: >-
+          {{ (verify_requirements.stdout | from_json).values() | list
              if (verify_requirements.stdout | trim | length) > 2 else [] }}
+
+    - name: Separate the errors from the warnings
+      ansible.builtin.set_fact:
+        verify_status_items: "{{ verify_status_raw | map(attribute='title') | list }}"
+        verify_status_errors: >-
+          {{ verify_status_raw | selectattr('sid', 'defined')
+                               | selectattr('sid', 'ge', 2) | list }}
+
+    # Titles rather than whole records, because that is all the allowlist deals
+    # in. One record per title, so subtracting the error titles is exact.
+    - name: Reduce the warnings to their titles
+      ansible.builtin.set_fact:
+        verify_status_warning_titles: >-
+          {{ verify_status_items
+             | difference(verify_status_errors | map(attribute='title') | list) }}
 
     - name: Report the Drupal status page state
       ansible.builtin.debug:
@@ -284,18 +323,37 @@
           {{ 'Drupal status report is completely clean.' if verify_status_items | length == 0
              else 'Outstanding status report items: ' ~ (verify_status_items | join(', ')) }}
 
-    # The allowlist is deliberately explicit rather than a blanket skip, so a
-    # newly appearing warning fails the run instead of hiding behind a known one.
-    - name: Assert no unexpected status report warnings or errors
+    # No allowlist here on purpose. An error-severity item means the site is
+    # actually broken or actually insecure -- "Not secure!", "Revoked!",
+    # "Unsupported release", or security coverage that has ended -- and Drupal
+    # files all of those under the same two titles the allowlist tolerates as
+    # warnings. Checking the title alone, as this once did, meant a site running
+    # a release with a known vulnerability passed the smoke test.
+    - name: Assert nothing on the status report is an error
       ansible.builtin.assert:
         that:
-          - verify_status_items | difference(verify_status_allowed) | length == 0
+          - verify_status_errors | length == 0
+        fail_msg: >-
+          Error-severity items on the Drupal status report:
+          {{ verify_status_errors | map(attribute='title') | join(', ') }}
+          -- reported as:
+          {{ verify_status_errors | map(attribute='value')
+             | map('striptags') | map('trim') | join('; ') }}.
+          These are never allowlisted: they mean the site is insecure or broken,
+          not merely behind.
+
+    # The allowlist is deliberately explicit rather than a blanket skip, so a
+    # newly appearing warning fails the run instead of hiding behind a known one.
+    - name: Assert no unexpected status report warnings
+      ansible.builtin.assert:
+        that:
+          - verify_status_warning_titles | difference(verify_status_allowed) | length == 0
         fail_msg: >-
           Unexpected Drupal status report items:
-          {{ verify_status_items | difference(verify_status_allowed) | join(', ') }}
+          {{ verify_status_warning_titles | difference(verify_status_allowed) | join(', ') }}
         success_msg: >-
           {{ 'Status report clean.' if verify_status_items | length == 0
-             else 'Only known-unfixable items remain: ' ~ (verify_status_items | join(', ')) }}
+             else 'Only known-unfixable warnings remain: ' ~ (verify_status_items | join(', ')) }}
 
     - name: Assert the hash salt is present and non-empty
       ansible.builtin.command:

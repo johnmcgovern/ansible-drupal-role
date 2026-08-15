@@ -1,0 +1,77 @@
+---
+# The PHP a platform ships is a hard ceiling on the Drupal it can run, and
+# nothing about hitting that ceiling is loud. Composer resolves to the newest
+# release whose platform requirement is satisfiable, so on PHP 8.3 a fresh
+# install silently lands on Drupal 11 rather than 12, and upgrade.yml -- which
+# updates within composer.json's existing constraints -- keeps it there for the
+# life of the host. The site works. It is simply pinned to a major nobody chose,
+# for a reason the run never mentions.
+#
+# So the run mentions it. Reported rather than fatal, because a host that can
+# only run Drupal 11 is a perfectly good host: Drupal 11 is current and fully
+# supported. What would be wrong is not knowing.
+
+- name: Determine the PHP version available to Drupal
+  ansible.builtin.command:
+    cmd: php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
+  register: drupal_php_probe
+  changed_when: false
+
+- name: Work out which Drupal release series this host's PHP can run
+  ansible.builtin.set_fact:
+    drupal_php_version: "{{ drupal_php_probe.stdout | trim }}"
+    # A series is runnable when its minimum PHP is at or below what is installed.
+    drupal_php_majors_ok: >-
+      {{ drupal_php_requirements | dict2items
+         | selectattr('value', 'version', drupal_php_probe.stdout | trim, '<=')
+         | map(attribute='key') | map('int') | sort | list }}
+    drupal_php_majors_known: "{{ drupal_php_requirements.keys() | map('int') | sort | list }}"
+
+# Every platform these roles support ships PHP 8.3 or newer, so this cannot
+# normally fire -- roles/common would have rejected the host first. It exists so
+# that if it ever does, the message names the problem instead of the next task
+# failing on `max` of an empty list.
+- name: Fail when the installed PHP is too old for any supported Drupal
+  ansible.builtin.fail:
+    msg: >-
+      PHP {{ drupal_php_version }} is below the minimum for every Drupal series
+      these roles install. The oldest supported is Drupal
+      {{ drupal_php_majors_known | min }}, which needs PHP
+      {{ drupal_php_requirements[(drupal_php_majors_known | min) | string] }}.
+  when: drupal_php_majors_ok | length == 0
+
+- name: Report the newest Drupal series this host's PHP supports
+  ansible.builtin.debug:
+    msg: >-
+      PHP {{ drupal_php_version }} caps this host at Drupal
+      {{ drupal_php_majors_ok | max }}.x. Drupal
+      {{ drupal_php_majors_known | max }} requires PHP
+      {{ drupal_php_requirements[(drupal_php_majors_known | max) | string] }}, which
+      {{ ansible_distribution }} {{ ansible_distribution_major_version }} does not
+      ship. Installs and upgrades will stay on Drupal
+      {{ drupal_php_majors_ok | max }}.x -- Composer picks the newest release
+      this PHP can satisfy, so nothing will fail, it will simply never move to
+      {{ drupal_php_majors_known | max }}. Moving forward means a platform with a
+      newer PHP.
+  when:
+    - drupal_php_majors_ok | length > 0
+    - (drupal_php_majors_ok | max) < (drupal_php_majors_known | max)
+
+# Asking for a specific version is different from accepting whatever fits: the
+# operator has named a series, and if this host cannot run it, saying so now
+# beats a Composer dependency-solver wall of text that mentions PHP once.
+- name: Fail when the pinned Drupal version needs a newer PHP than this host has
+  ansible.builtin.fail:
+    msg: >-
+      drupal_version is pinned to {{ drupal_version }}, which is Drupal
+      {{ drupal_pinned_major }} and requires PHP
+      {{ drupal_php_requirements[drupal_pinned_major] }}. This host has PHP
+      {{ drupal_php_version }} and can run up to Drupal
+      {{ drupal_php_majors_ok | max }}.x. Either deploy onto a platform with a
+      newer PHP, or pin to a {{ drupal_php_majors_ok | max }}.x release.
+  vars:
+    drupal_pinned_major: "{{ drupal_version | regex_search('[0-9]+') }}"
+  when:
+    - drupal_version | default('') | length > 0
+    - drupal_pinned_major in drupal_php_requirements
+    - (drupal_pinned_major | int) not in drupal_php_majors_ok

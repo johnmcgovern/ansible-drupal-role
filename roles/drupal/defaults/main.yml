@@ -42,6 +42,26 @@ drupal_hash_salt_file: "{{ drupal_base_path }}/.hash_salt"
 
 drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
 
+# Minimum PHP for each Drupal release series, from
+# https://www.drupal.org/docs/getting-started/system-requirements/php-requirements
+#
+# A fact about Drupal rather than about this deployment, so it is stated once
+# and consulted. Drupal 12 requiring PHP 8.5 was committed to 12.x in January
+# 2026; 12.0.0 is due the week of 7 December 2026. Drupal 10 is omitted because
+# these roles install 11 or newer.
+#
+# This matters because the PHP a platform ships is a hard ceiling on the Drupal
+# it can run, and the failure is silent: Composer resolves to the newest release
+# whose platform requirement is satisfiable, so a PHP 8.3 host quietly installs
+# Drupal 11 and upgrade.yml keeps it there forever without ever saying why.
+# 00_php_compatibility.yml turns that into something the run states out loud.
+#
+# Keys are quoted so YAML keeps them as strings; the values are compared with
+# the `version` test, which wants text.
+drupal_php_requirements:
+  "11": "8.3"
+  "12": "8.5"
+
 # Drush bootstraps Drupal, which writes the twig cache under
 # sites/default/files. Running it as root leaves root-owned files there that the
 # web server cannot rewrite, so every drush invocation runs as the web server

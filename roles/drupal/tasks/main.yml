@@ -11,6 +11,11 @@
       drupal_admin_password and db_user_password must be set, ideally in an
       ansible-vault encrypted file. See the README.
 
+# Before anything is installed, so that a host which cannot run the requested
+# Drupal says so instead of finding out inside Composer.
+- name: Check PHP against the Drupal release series
+  ansible.builtin.import_tasks: 00_php_compatibility.yml
+
 - name: Install Composer
   ansible.builtin.import_tasks: 01_install_composer.yml
 

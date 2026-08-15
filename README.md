@@ -87,9 +87,43 @@ The two **No** entries are the only functional differences. A RHEL host that nee
 should terminate TLS in front of it; a RHEL host that needs AVIF derivatives should use
 `php-imagick` with Drupal's ImageMagick toolkit.
 
-**Drupal versions.** Drupal 11 requires PHP 8.3 and recommends 8.4; Drupal 12 is
-expected to require 8.5. That requirement, not the distribution, is what decides
-whether a platform is viable — it is why RHEL 8.10 is out.
+#### Drupal versions, and the PHP ceiling
+
+Drupal's PHP requirement, not the distribution, is what decides whether a platform is
+viable — it is why RHEL 8.10 is out. The same arithmetic has a near-term consequence for
+two platforms in the table above:
+
+| Drupal | Minimum PHP | Status |
+|---|---|---|
+| 11 (11.4.x current, 11.3.x also patched) | 8.3, 8.4 recommended | Current |
+| 12 | **8.5** | Due the week of 7 December 2026 |
+
+| Platform | Max PHP it ships | Drupal 11 | Drupal 12 |
+|---|---|---|---|
+| Ubuntu 24.04 | 8.3 | Yes | **No** |
+| Ubuntu 26.04 | 8.5 | Yes | Yes |
+| RHEL 9 | 8.3 (AppStream tops out here) | Yes | **No** |
+
+Ubuntu 24.04 and RHEL 9 will not run Drupal 12 from distribution packages. Neither is
+broken by this — Drupal 11 is current and fully supported — but both are pinned to the
+11.x series for as long as they ship PHP 8.3, and the roles will not add a third-party
+repository to change that, for the same reason they do not add EPEL for certbot.
+
+The failure mode here is silence, so the roles say it out loud instead. Composer resolves
+to the newest release whose platform requirement is satisfiable, so a PHP 8.3 host quietly
+installs Drupal 11 and `upgrade.yml` keeps it there indefinitely, with nothing in the run
+explaining why. Every deploy now reports the ceiling:
+
+```
+PHP 8.3 caps this host at Drupal 11.x. Drupal 12 requires PHP 8.5, which RedHat 9
+does not ship. Installs and upgrades will stay on Drupal 11.x ...
+```
+
+Asking for a series the host cannot run is a different matter — that is a stated
+intention, not an accident — so it fails immediately rather than part-way through a
+Composer resolution: pinning `drupal_version` to a 12.x release, or running
+`upgrade.yml -e upgrade_target='^12'`, stops before anything is installed or backed up
+and names the PHP version it would need.
 
 Package versions are what each distribution ships, but nothing here pins them. The PHP
 version is discovered at runtime and every derived path (the FPM socket, the service
@@ -385,8 +419,19 @@ It asserts the web server, PHP-FPM and MariaDB are running, that the FPM socket 
 at the path the vhost points at, that the front page returns a rendered Drupal page
 rather than a PHP error, that Drupal bootstraps, that the hash salt is non-empty, that
 `settings.php` is not writable by the web server, and that the config sync directory is
-where Drupal actually looks for it. It also reports any error-severity items on the
-Drupal status report.
+where Drupal actually looks for it. It also checks the Drupal status report.
+
+Status report items are judged by **severity, not title**. Warnings may be allowlisted by
+name — the GD/AVIF one, and the update-status items, which report a fetch problem that
+depends on Drupal's queue and drupal.org rather than on anything deployed here. Errors
+never are. That distinction matters because Drupal files both the harmless and the
+serious states under the same title: `Not secure!`, `Revoked!` and `Unsupported release`
+are errors on the same "Drupal core update status" line that carries the flaky
+fetch-pending warning, as is security coverage that has ended. Allowlisting by title
+alone, as this once did, meant a site running a release with a known vulnerability
+passed the smoke test. `Out of date` stays a tolerated warning: a newer release existing
+is not a security problem, and failing on it would make the test fail as a function of
+the upstream release calendar.
 
 PHP settings are read via `php-fpm -i` rather than the `php` CLI. On Ubuntu the two
 SAPIs load different `conf.d` directories, so a CLI-based check would pass even if the
