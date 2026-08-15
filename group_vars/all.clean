@@ -1,0 +1,80 @@
+---
+# Terse form of all.sample: identical settings, section headings only.
+# See all.sample for what each one does and what it costs.
+
+# Ansible connection
+ansible_user: username
+# ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+
+# Web server
+webserver_sitename: mysite.example.com
+webserver_email: example@example.com
+webserver_max_body_size: 64M
+webserver_tls_enabled: false
+# webserver_tls_email: certs@example.com
+webserver_tls_challenge: http-01
+# webserver_tls_cloudflare_token: "{{ vault_cloudflare_token }}"
+webserver_tls_staging: false
+# webserver_user: www-data
+# webserver_group: www-data
+
+# PHP tuning
+php_memory_limit: 256M
+php_max_execution_time: 60
+# php_upload_max_filesize: 64M
+# php_post_max_size: 64M
+php_opcache_memory_consumption: 192
+php_apcu_shm_size: 64M
+php_gd_avif_build: false
+php_fpm_pool_settings:
+  pm: dynamic
+  pm.max_children: 20
+  pm.start_servers: 4
+  pm.min_spare_servers: 2
+  pm.max_spare_servers: 6
+  pm.max_requests: 500
+
+# MariaDB
+db_service: mariadb
+db_host: localhost
+db_port: 3306
+db_transaction_isolation: READ-COMMITTED
+db_name: drupal
+db_user: drupal_user
+db_user_password: CHANGEME   # SECRET
+db_user_perms: "SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES"
+
+# Drupal
+drupal_base_path: /var/www/drupal
+drupal_version: ""
+# drupal_allow_unstable: false
+drupal_sitename: Drupal Test Site
+drupal_email: example@example.com
+drupal_region: en
+drupal_cron_enabled: true
+drupal_cron_on_calendar: hourly
+drupal_backup_enabled: true
+drupal_backup_path: /var/backups/drupal
+drupal_backup_on_calendar: daily
+drupal_backup_retention_days: 14
+drupal_admin: admin
+drupal_admin_password: CHANGEME   # SECRET
+# drupal_admin_email: admin@example.com
+drupal_enable_html5_validation: false
+drupal_password_algorithm: argon2id
+drupal_password_options: {}
+drupal_trusted_host_patterns: []
+
+# Drupal modules
+drupal_install_modules:
+  - token
+  - schema_metatag
+  - ctools
+  - pathauto
+  - metatag
+drupal_enable_modules:
+  - token
+  - schema_metatag
+  - ctools
+  - pathauto
+  - metatag

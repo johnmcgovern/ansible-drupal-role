@@ -255,6 +255,16 @@ cp hosts.sample hosts && cp group_vars/all.sample group_vars/all
 3. Edit `hosts` to point at your server, and `group_vars/all` for your environment.
    Both files are gitignored.
 
+`group_vars/all.clean` is the same 40 settings with the explanations stripped down to
+one-line section headings — 82 lines against the sample's 234. Copy that one instead if
+you would rather read the configuration than the reasoning; the sample remains the
+documentation, and `tests/check-vars-drift.py` treats the two as equivalent because they
+carry identical keys and values.
+
+```bash
+cp group_vars/all.clean group_vars/all
+```
+
 
 ### Secrets
 
