@@ -1,6 +1,14 @@
 ---
 drupal_base_path: /var/www/drupal
 
+# Drupal release to install. Empty installs the newest stable, which is what
+# most deployments want. Pin to an exact version ("11.4.4") to stand a site up
+# on a known release -- useful for reproducing a bug, or for staging an upgrade
+# rehearsal. This only affects a first install: once composer.json exists the
+# codebase is never re-created, so changing this on an existing host does
+# nothing. Use upgrade.yml to move an installed site forward.
+drupal_version: ""
+
 # Mirrors roles/common/defaults. Role defaults do not carry across plays, and
 # the drupal role runs in its own play.
 webserver_user: www-data

@@ -12,7 +12,9 @@
 - name: Install Drupal with Composer
   ansible.builtin.command:
     cmd: >-
-      composer create-project drupal/recommended-project {{ drupal_base_path | basename }}
+      composer create-project
+      drupal/recommended-project{{ (':' ~ drupal_version) if drupal_version else '' }}
+      {{ drupal_base_path | basename }}
       --stability stable --no-interaction
     chdir: "{{ drupal_base_path | dirname }}"
   environment: "{{ drupal_composer_env }}"

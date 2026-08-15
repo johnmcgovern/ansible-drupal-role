@@ -32,16 +32,31 @@ are exercised by a blocking CI leg on every push, so this list and CI cannot dri
 Earlier Ubuntu releases are not supported — 18.04/20.04 were dropped along with the
 workarounds they needed.
 
-|            | 24.04 (noble) | 26.04 (resolute) |
-|------------|---------------|------------------|
-| PHP        | 8.3           | 8.5              |
-| MariaDB    | 10.11         | 11.8             |
-| nginx      | 1.24          | 1.28             |
+#### Platform compatibility matrix
 
-Nothing pins those versions. The PHP version is discovered at runtime and every derived
-path (the FPM socket, the service name, the `conf.d` directories) follows from it; the
-nginx vhost picks its `http2` syntax from the installed nginx; and optional PHP packages
-are probed with apt rather than assumed. Two differences are worth knowing about:
+| Platform | Status | PHP | MariaDB | nginx | Notes |
+|---|---|---|---|---|---|
+| Ubuntu 24.04 LTS (noble) | **Supported** — blocking CI leg | 8.3 | 10.11 | 1.24 | Reference platform |
+| Ubuntu 26.04 LTS (resolute) | **Supported** — blocking CI leg | 8.5 | 11.8 | 1.28 | No `php-opcache` package; OPcache is built into PHP 8.5 |
+| RHEL 9.7 | *Planned* | 8.3 (AppStream stream) | 10.11 (module stream) | 1.22 | Needs a `dnf` port and SELinux work — see below |
+| RHEL 8.10 | **Not viable** | 8.2 max | 10.11 | 1.14 | AppStream tops out at PHP 8.2; Drupal 11 requires 8.3 |
+| Rocky Linux 9 | *Future* | as RHEL 9 | as RHEL 9 | as RHEL 9 | Should follow the RHEL 9 port almost unchanged |
+| Amazon Linux 2023 | *Future* | 8.4 (`php8.4` packages) | MariaDB 10.5 | 1.24 | Different package naming again; no module streams |
+| Ubuntu 18.04 / 20.04 / 22.04 | **Dropped** | — | — | — | Removed along with the workarounds they needed |
+
+"Supported" means a blocking CI leg deploys and verifies the whole stack on every
+push. Nothing else carries that guarantee.
+
+**Drupal versions.** Drupal 11 requires PHP 8.3 and recommends 8.4; Drupal 12 is
+expected to require 8.5. That requirement, not the distribution, is what decides
+whether a platform is viable — it is why RHEL 8.10 is out.
+
+Package versions are what each distribution ships, but nothing here pins them. The PHP
+version is discovered at runtime and every derived path (the FPM socket, the service
+name, the `conf.d` directories) follows from it; the nginx vhost picks its `http2`
+syntax from the installed nginx; and optional PHP packages are probed with apt rather
+than assumed. Two differences are worth knowing about:
+
 
 - **OPcache.** `php-opcache` is a separate package through PHP 8.4 but does not exist on
   26.04, where PHP 8.5 builds OPcache into the interpreter. Naming a missing package
@@ -49,6 +64,42 @@ are probed with apt rather than assumed. Two differences are worth knowing about
   offers a candidate, and the play reports what it skipped.
 - **AVIF.** Still absent from 26.04's `libgd3`, exactly as on 24.04, so the opt-in
   `php_gd_avif_build` remains relevant on both.
+
+#### Porting to RHEL 9.7 — what it involves
+
+Not started. Recording the shape of it so the cost is visible before anyone commits.
+Every role is Debian-specific today, so this is a port rather than a configuration
+change:
+
+- **Package management.** `ansible.builtin.apt` appears in all four roles and becomes
+  `dnf`. Package names differ throughout (`php-fpm` vs `php-fpm`, but `php-mysql` vs
+  `php-mysqlnd`, `mariadb-server` in a module stream). PHP arrives through an AppStream
+  module stream that has to be enabled explicitly, which has no apt equivalent.
+- **Paths.** `/etc/php/<version>/{cli,fpm}/conf.d` becomes `/etc/php.d` with a single
+  flat directory and no per-SAPI split — which quietly invalidates the FPM-vs-CLI
+  distinction `tests/verify.yml` deliberately tests. `/etc/mysql/mariadb.conf.d`
+  becomes `/etc/my.cnf.d`. The FPM socket path and the service name both change.
+- **SELinux.** The largest piece, and the one with no Debian counterpart. The docroot
+  needs `httpd_sys_content_t`, `sites/default/files` and the config sync directory need
+  `httpd_sys_rw_content_t`, and nginx needs `httpd_can_network_connect_db` to reach
+  MariaDB over a socket. Getting this wrong produces permission errors that look
+  nothing like permission errors.
+- **Firewall.** `firewalld` is active by default and will block ports 80 and 443, which
+  Ubuntu does not do.
+- **MariaDB root authentication.** The `unix_socket` plugin is not configured the same
+  way, so the "no root password anywhere" property this repo relies on needs
+  re-establishing rather than assuming.
+- **CI.** GitHub does not offer RHEL runners. Coverage means a self-hosted runner, or a
+  container with systemd, or dropping to Rocky/Alma as a stand-in — and a container
+  reintroduces exactly the systemd-in-Docker problems the current CI design avoids.
+
+Rocky Linux 9 should follow almost unchanged once RHEL 9 works, since the divergence is
+branding rather than packaging. Amazon Linux 2023 is a third dialect again: no module
+streams, versioned `php8.4` package names, and its own MariaDB packaging.
+
+The honest estimate is days rather than hours, and it permanently doubles the surface
+that every future feature has to carry — the same cost that made Apache support worth
+deleting. Worth doing if RHEL is a real deployment target; not worth doing speculatively.
 
 
 ### Requirements
@@ -173,6 +224,16 @@ lower it on a small VM.
 ansible-playbook -i hosts site.yml
 ```
 
+Install a specific Drupal release instead of the newest stable:
+
+```yaml
+drupal_version: "11.4.4"
+```
+
+This only affects a first install. Once `composer.json` exists the codebase is never
+re-created, so changing it on an existing host does nothing — moving an installed site
+forward is what `upgrade.yml` is for.
+
 Limit to a subset of hosts:
 
 ```bash
@@ -183,6 +244,34 @@ The playbook is idempotent — a second run against a converged host reports zer
 changes. Re-running is safe on a live site: Drupal is only installed when
 `drush status` reports it is not already bootstrapped, and the hash salt is generated
 once and never rewritten.
+
+
+### Upgrading
+
+`site.yml` never moves an installed site forward: it skips the codebase entirely once
+`composer.json` exists, so a converged host stays on the release it was built with.
+Upgrading is a deliberate, ordered operation with a database step in the middle, so it
+is a separate playbook.
+
+```bash
+ansible-playbook -i hosts upgrade.yml                        # within current constraints
+ansible-playbook -i hosts upgrade.yml -e upgrade_target='^11.5'   # to a new minor/major
+```
+
+It follows the documented Drupal sequence: take a backup, enter maintenance mode, update
+the code with Composer, run `updatedb`, rebuild caches, leave maintenance mode. Running
+`updatedb` against a live site risks serving requests through a half-migrated schema,
+which is why the outage is deliberate. The database step is wrapped so that a failure
+still takes the site back out of maintenance mode.
+
+The pre-upgrade backup is the rollback plan: Composer can be reverted from
+`composer.lock`, but a failed `updatedb` cannot be undone without the database.
+`drupal-restore.sh` restores exactly what it produces. Set `upgrade_backup: false` only
+if you have just taken one by hand.
+
+The playbook reports the version before and after, and asserts the site still bootstraps
+afterwards. Re-running it when there is nothing to do reports
+`11.4.5 -> 11.4.5 (no change: already at the newest release allowed by composer.json)`.
 
 
 ### Testing

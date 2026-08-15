@@ -1,0 +1,242 @@
+---
+# Upgrades an installed Drupal site in place.
+#
+#   ansible-playbook -i hosts upgrade.yml
+#   ansible-playbook -i hosts upgrade.yml -e upgrade_target='^11.5'
+#   ansible-playbook -i hosts upgrade.yml --check
+#
+# site.yml deliberately never moves an installed site forward: it skips the
+# codebase entirely once composer.json exists, so a converged host stays on the
+# release it was built with. Upgrading is a deliberate, ordered operation with a
+# database step in the middle, so it lives here rather than being a side effect
+# of a routine deploy.
+#
+# Order matters and is the documented Drupal sequence: back up, take the site
+# offline, update the code, run database updates, rebuild caches, come back
+# online. Running updatedb against a live site risks serving requests through a
+# half-migrated schema.
+
+- name: Upgrade Drupal
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  # Prefixed so they cannot shadow the deployment's own variables. Play vars
+  # outrank group_vars, so reusing the real names here would silently override
+  # the host's configuration -- a mistake already made once in tests/verify.yml.
+  vars:
+    upgrade_base_path: "{{ drupal_base_path | default('/var/www/drupal') }}"
+    upgrade_drush: "{{ upgrade_base_path }}/vendor/bin/drush"
+    upgrade_web_user: "{{ webserver_user | default('www-data') }}"
+    upgrade_web_group: "{{ webserver_group | default('www-data') }}"
+    upgrade_config_sync: "{{ drupal_config_sync_path | default(upgrade_base_path ~ '/config/sync') }}"
+    upgrade_composer_env:
+      COMPOSER_HOME: /root/.composer
+      COMPOSER_ALLOW_SUPERUSER: "1"
+      COMPOSER_NO_INTERACTION: "1"
+    upgrade_drush_env:
+      HOME: /tmp
+
+    # Empty updates within the constraints already in composer.json, which moves
+    # patch and minor releases inside the current major. Set to a constraint such
+    # as '^11.5' to move to a new minor or major, which rewrites the core
+    # requirements the way Drupal's upgrade documentation prescribes.
+    upgrade_target: ""
+
+    # Take a backup first. There is no reason to skip this other than having
+    # just taken one by hand.
+    upgrade_backup: true
+
+    # Maintenance mode during the database update. Turning this off shortens the
+    # outage but serves requests against a partially migrated schema.
+    upgrade_maintenance_mode: true
+
+  tasks:
+
+    - name: Assert Drupal is installed on this host
+      ansible.builtin.stat:
+        path: "{{ upgrade_base_path }}/composer.json"
+      register: upgrade_composer_json
+      failed_when: not upgrade_composer_json.stat.exists
+
+    - name: Confirm the site bootstraps before touching anything
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} status --field=bootstrap"
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      register: upgrade_bootstrap
+      changed_when: false
+      failed_when: "'Successful' not in upgrade_bootstrap.stdout"
+
+    - name: Record the version before upgrading
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} status --field=drupal-version"
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      register: upgrade_version_before
+      changed_when: false
+
+    - name: Report the starting point
+      ansible.builtin.debug:
+        msg: >-
+          Upgrading Drupal {{ upgrade_version_before.stdout | trim }}
+          {{ 'to ' ~ upgrade_target if upgrade_target else 'within its current constraints' }}.
+
+    # A pre-upgrade backup is the whole rollback plan: composer can be reverted
+    # from composer.lock, but a failed updatedb cannot be undone without the
+    # database. drupal-restore.sh restores what this produces.
+    - name: Take a pre-upgrade backup
+      ansible.builtin.systemd_service:
+        name: drupal-backup.service
+        state: started
+      when: upgrade_backup
+
+    - name: Check the backup succeeded
+      ansible.builtin.systemd_service:
+        name: drupal-backup.service
+      register: upgrade_backup_result
+      changed_when: false
+      failed_when: upgrade_backup_result.status.Result != 'success'
+      when: upgrade_backup
+
+    - name: Put the site into maintenance mode
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} state:set system.maintenance_mode 1 --input-format=integer"
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      changed_when: true
+      when: upgrade_maintenance_mode
+
+    # From here on a failure leaves the site in maintenance mode, so the rest is
+    # wrapped to guarantee it is taken back out.
+    - name: Perform the upgrade
+      block:
+
+        - name: Update Drupal core within its current constraints
+          ansible.builtin.command:
+            cmd: composer update "drupal/core-*" --with-all-dependencies --no-interaction
+            chdir: "{{ upgrade_base_path }}"
+          environment: "{{ upgrade_composer_env }}"
+          when: not upgrade_target
+          changed_when: true
+
+        # Moving to a new minor or major means rewriting the core requirements,
+        # not just updating within them. These three packages are what
+        # drupal/recommended-project pins, and they must move together.
+        - name: Move Drupal core to a new constraint
+          ansible.builtin.command:
+            cmd: >-
+              composer require
+              drupal/core-recommended:{{ upgrade_target }}
+              drupal/core-composer-scaffold:{{ upgrade_target }}
+              drupal/core-project-message:{{ upgrade_target }}
+              --update-with-all-dependencies --no-interaction
+            chdir: "{{ upgrade_base_path }}"
+          environment: "{{ upgrade_composer_env }}"
+          when: upgrade_target | length > 0
+          changed_when: true
+
+        # Composer wrote as root. Hand the tree back before Drupal runs, or the
+        # web server cannot write its caches afterwards.
+        - name: Reset ownership of the Drupal tree
+          ansible.builtin.file:
+            path: "{{ upgrade_base_path }}"
+            state: directory
+            owner: root
+            group: "{{ upgrade_web_group }}"
+            recurse: true
+
+        - name: Restore the writable directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: "{{ upgrade_web_user }}"
+            group: "{{ upgrade_web_group }}"
+            recurse: true
+          loop:
+            - "{{ upgrade_base_path }}/web/sites/default/files"
+            - "{{ upgrade_config_sync }}"
+
+        - name: Run database updates
+          ansible.builtin.command:
+            cmd: "{{ upgrade_drush }} updatedb --yes"
+            chdir: "{{ upgrade_base_path }}"
+          become: true
+          become_user: "{{ upgrade_web_user }}"
+          environment: "{{ upgrade_drush_env }}"
+          register: upgrade_updatedb
+          changed_when: "'No pending updates' not in upgrade_updatedb.stdout"
+
+        - name: Rebuild caches
+          ansible.builtin.command:
+            cmd: "{{ upgrade_drush }} cache:rebuild"
+            chdir: "{{ upgrade_base_path }}"
+          become: true
+          become_user: "{{ upgrade_web_user }}"
+          environment: "{{ upgrade_drush_env }}"
+          changed_when: true
+
+      always:
+        - name: Take the site out of maintenance mode
+          ansible.builtin.command:
+            cmd: "{{ upgrade_drush }} state:set system.maintenance_mode 0 --input-format=integer"
+            chdir: "{{ upgrade_base_path }}"
+          become: true
+          become_user: "{{ upgrade_web_user }}"
+          environment: "{{ upgrade_drush_env }}"
+          changed_when: true
+          when: upgrade_maintenance_mode
+
+    - name: Refresh update data so the status report reflects the new version
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} php:eval \"\\Drupal::service('update.manager')->refreshUpdateData();\""
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      changed_when: true
+
+    - name: Drain the update fetch queue
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} cron"
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      changed_when: true
+
+    - name: Record the version after upgrading
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} status --field=drupal-version"
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      register: upgrade_version_after
+      changed_when: false
+
+    - name: Assert the site still bootstraps
+      ansible.builtin.command:
+        cmd: "{{ upgrade_drush }} status --field=bootstrap"
+        chdir: "{{ upgrade_base_path }}"
+      become: true
+      become_user: "{{ upgrade_web_user }}"
+      environment: "{{ upgrade_drush_env }}"
+      register: upgrade_bootstrap_after
+      changed_when: false
+      failed_when: "'Successful' not in upgrade_bootstrap_after.stdout"
+
+    - name: Report the result
+      ansible.builtin.debug:
+        msg: >-
+          {{ upgrade_version_before.stdout | trim }} ->
+          {{ upgrade_version_after.stdout | trim }}
+          {{ '(no change: already at the newest release allowed by composer.json)'
+             if (upgrade_version_before.stdout | trim) == (upgrade_version_after.stdout | trim)
+             else '' }}

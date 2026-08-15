@@ -139,6 +139,11 @@ db_user_perms: "SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPO
 
 drupal_base_path: /var/www/drupal
 
+# Drupal release to install. Empty installs the newest stable. Pin to an exact
+# version ("11.4.4") to build on a known release. Only affects a first install;
+# use upgrade.yml to move an installed site forward.
+drupal_version: ""
+
 drupal_sitename: Drupal Test Site
 drupal_email: example@example.com
 drupal_region: en
