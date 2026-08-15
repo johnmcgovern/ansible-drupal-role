@@ -103,6 +103,22 @@
   changed_when: false
   when: webserver_tls_active
 
+# Applied here rather than left to the end of the play, for the same reason
+# 03_webserver_vhost_config.yml flushes before certbot runs: a handler that has
+# only been notified has not happened yet, and anything failing later in the
+# play discards it. That is not a transient problem. Ansible notifies on change,
+# so once the template matches what is on disk, no later run re-notifies -- the
+# restart is never retried and nginx serves the pre-TLS configuration
+# indefinitely while the file beside it says otherwise. `nginx -t` passes
+# throughout, because the file is valid; it is simply not what is loaded.
+#
+# Seen exactly that way: the TLS vhost was written at 13:06:32, the play failed
+# in a later role, and nginx was still running its 13:05:50 configuration --
+# port 443 closed on a host holding a valid certificate. tests/verify.yml
+# catches it now, but not stranding the restart in the first place is better.
+- name: Apply the pending web server restart so the TLS vhost takes effect
+  ansible.builtin.meta: flush_handlers
+
 # The certbot package ships a systemd timer that renews automatically, but it
 # has no way to know the web server needs reloading to pick up the new
 # certificate. Deploy hooks run only when a certificate is actually renewed.

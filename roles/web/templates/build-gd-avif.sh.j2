@@ -25,7 +25,7 @@ cd "$SRC"
 
 echo "==> Fetching libgd source (Ubuntu's, so distro patches are preserved)"
 apt-get source libgd2
-GD_DIR="$(find . -maxdepth 1 -type d -name 'libgd2-*' | head -1)"
+GD_DIR="$(find . -maxdepth 1 -type d -name 'libgd2-*' -print -quit)"
 [ -n "$GD_DIR" ] || { echo "FATAL: libgd2 source not found" >&2; exit 1; }
 
 echo "==> Building libgd into $PREFIX"
@@ -62,16 +62,24 @@ fi
 make -j"$(nproc)"
 make install
 
-if ! nm -D "$PREFIX/lib/libgd.so" 2>/dev/null | grep -q gdImageAvifPtr; then
-    echo "FATAL: built libgd has no AVIF support (gdImageAvifPtr missing)" >&2
-    exit 1
-fi
+# Captured, not piped. `nm | grep -q` looks equivalent and is not: grep -q
+# exits on the first match, nm dies of SIGPIPE, and under `set -o pipefail` the
+# pipeline reports failure precisely when the symbol IS present. The `!` then
+# inverts that into a fatal "no AVIF support" on a library that has it.
+# Measured at roughly one failure in ten runs on a 476-symbol library, which is
+# exactly the sort of intermittency that gets blamed on the network.
+GD_SYMBOLS="$(nm -D "$PREFIX/lib/libgd.so" 2>/dev/null || true)"
+case "$GD_SYMBOLS" in
+    *gdImageAvifPtr*) ;;
+    *)  echo "FATAL: built libgd has no AVIF support (gdImageAvifPtr missing)" >&2
+        exit 1 ;;
+esac
 echo "==> libgd built with AVIF"
 
 echo "==> Fetching PHP $PHP_VERSION source for ext/gd"
 cd "$SRC"
 apt-get source "php$PHP_VERSION"
-PHP_DIR="$(find . -maxdepth 1 -type d -name "php$PHP_VERSION-*" | head -1)"
+PHP_DIR="$(find . -maxdepth 1 -type d -name "php$PHP_VERSION-*" -print -quit)"
 [ -n "$PHP_DIR" ] || { echo "FATAL: php$PHP_VERSION source not found" >&2; exit 1; }
 
 echo "==> Building ext/gd against $PREFIX"
