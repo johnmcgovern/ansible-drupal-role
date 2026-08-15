@@ -225,6 +225,27 @@ Lint before committing:
 ansible-lint && yamllint .
 ```
 
+#### Checking group_vars for drift
+
+`group_vars/all.sample` is the documentation, and a real `group_vars/all` is written
+once and rarely revisited, so it falls behind as features land. The drift is invisible
+in normal use because role defaults cover the missing keys — by design, but it means a
+host can be running behaviour its own vars file never mentions.
+
+```bash
+tests/check-vars-drift.py
+```
+
+It separates the drift that matters from the drift that does not. A key missing from
+your `group_vars/all` is only worth acting on when the role default differs from what
+the sample documents; otherwise the host behaves exactly as documented. It fails only on
+that case and on settings you have that the sample never mentions, so it is safe to run
+in CI — and it redacts anything that looks like a credential, so the output is safe to
+paste into an issue.
+
+With no `group_vars/all` present it checks the sample alone, asserting every documented
+key has a role default behind it. The lint workflow runs it in that mode.
+
 #### Continuous integration
 
 Two GitHub Actions workflows run on every push and pull request:

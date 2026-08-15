@@ -34,3 +34,9 @@ jobs:
 
       - name: Run ansible-lint
         run: ansible-lint
+
+      # Catches a sample that documents a variable no role defaults, which would
+      # leave it undefined at run time for anyone who omits it. Runs in
+      # --sample-only mode because group_vars/all is gitignored and absent here.
+      - name: Check group_vars sample against role defaults
+        run: tests/check-vars-drift.py --sample-only
