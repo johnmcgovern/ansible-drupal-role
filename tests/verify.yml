@@ -16,7 +16,12 @@
   vars:
     verify_base_path: "{{ drupal_base_path | default('/var/www/drupal') }}"
     verify_drush: "{{ verify_base_path }}/vendor/bin/drush"
-    verify_webserver_user: "{{ webserver_user | default('www-data') }}"
+    # Same OS-derived fallback the roles use: Debian's nginx runs as www-data,
+    # Red Hat's as nginx. Hardcoding either would make the ownership assertions
+    # below pass vacuously on the other platform.
+    verify_webserver_user: >-
+      {{ webserver_user
+         | default('nginx' if ansible_os_family == 'RedHat' else 'www-data') }}
     verify_sitename: "{{ webserver_sitename | default('127.0.0.1') }}"
     verify_max_body_size: "{{ webserver_max_body_size | default('64M') }}"
     verify_memory_limit: "{{ php_memory_limit | default('256M') }}"
@@ -24,9 +29,10 @@
     # Status report items this deployment cannot control.
     #
     # "GD library" is a warning purely because GD lacks AVIF: Ubuntu builds
-    # libgd2 without libavif on both 24.04 and 26.04 (LP#2031934). Enabling
-    # php_gd_avif_build resolves it, so the entry drops out of the allowlist and
-    # a GD warning becomes a failure again.
+    # libgd2 without libavif on both 24.04 and 26.04 (LP#2031934), and RHEL 9
+    # ships no libavif at all. Enabling php_gd_avif_build resolves it on Ubuntu,
+    # so the entry drops out of the allowlist and a GD warning becomes a failure
+    # again; on RHEL the flag is rejected outright, so the warning is permanent.
     #
     # The two update-status items depend on Drupal's fetch queue rather than on
     # anything installed here. Observed on a converged host: the release data is
@@ -58,6 +64,41 @@
          else 'http://127.0.0.1' }}
 
   tasks:
+
+    # Every TLS and AVIF assertion in this playbook is conditional on a
+    # variable that comes from group_vars. If group_vars is not loaded -- which
+    # happens silently whenever this playbook is run with an inventory that
+    # does not sit beside it, because Ansible looks for group_vars next to the
+    # inventory and next to the playbook and this one lives in tests/ -- those
+    # variables fall back to false and every one of those assertions is skipped.
+    # The run then passes having checked none of the things it exists to check.
+    #
+    # So: ask the host what it is actually doing, and refuse to continue if that
+    # contradicts the configuration this playbook thinks it is verifying. This
+    # is the same failure the play vars below are prefixed to avoid, arriving by
+    # a different route.
+    - name: Look for a TLS listener regardless of what the variables say
+      ansible.builtin.command:
+        cmd: ss -H -lnt sport = :443
+      register: verify_tls_listener
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the TLS configuration matches what the host is really serving
+      ansible.builtin.assert:
+        that:
+          - (verify_tls_listener.stdout | trim | length > 0) == verify_tls_enabled
+        fail_msg: >-
+          {{ 'This host is listening on port 443 but webserver_tls_enabled is
+              false, so every TLS assertion below would be skipped and this run
+              would pass without checking any of them. The usual cause is
+              group_vars not being loaded: Ansible looks for it beside the
+              inventory and beside the playbook, and this playbook lives in
+              tests/. Run it as `ansible-playbook -i hosts tests/verify.yml`
+              from the repository root, or pass the variables with -e.'
+             if (verify_tls_listener.stdout | trim | length > 0)
+             else 'webserver_tls_enabled is true but nothing is listening on
+              port 443.' }}
 
     - name: Collect service facts
       ansible.builtin.service_facts:
@@ -91,8 +132,16 @@
         success_msg: "Database server is {{ verify_db_version.stdout | trim }}."
 
     # Guards against a MySQL or Percona package arriving as a dependency of
-    # something else. mysql-common is excluded: it is a hard dependency of
-    # mariadb-common and only provides the shared /etc/mysql/my.cnf shim.
+    # something else. Each platform has exactly one false positive to exclude,
+    # and they are not the same package:
+    #
+    #   Debian  mysql-common is a hard dependency of mariadb-common and only
+    #           provides the shared /etc/mysql/my.cnf shim.
+    #   RedHat  mysql-selinux is the SELinux policy module for the MariaDB
+    #           server, pulled in by mariadb-server itself. Note that
+    #           mysql-common is NOT excluded here: on Red Hat it belongs to the
+    #           Oracle mysql:8.0 module stream, so its presence is exactly the
+    #           thing worth failing on.
     - name: List installed packages from other MySQL variants
       ansible.builtin.shell:
         cmd: >-
@@ -102,8 +151,27 @@
           | grep -E '^(mysql-server|mysql-client|mysql-community|percona-)|^libmysqlclient'
           | grep -vx 'mysql-common' || true
         executable: /bin/bash
-      register: verify_mysql_variants
+      register: verify_mysql_variants_deb
       changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: List installed packages from other MySQL variants
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          rpm -qa --qf '%{NAME}\n' 2>/dev/null
+          | grep -E '^(mysql|community-mysql|percona-)'
+          | grep -vx 'mysql-selinux' || true
+        executable: /bin/bash
+      register: verify_mysql_variants_rpm
+      changed_when: false
+      when: ansible_os_family == 'RedHat'
+
+    - name: Register the MySQL variant packages found
+      ansible.builtin.set_fact:
+        verify_mysql_variants: >-
+          {{ verify_mysql_variants_rpm if ansible_os_family == 'RedHat'
+             else verify_mysql_variants_deb }}
 
     - name: Assert no MySQL or Percona packages are installed
       ansible.builtin.assert:
@@ -120,19 +188,47 @@
       register: verify_php_version
       changed_when: false
 
+    # Derived exactly as roles/web derives them, and deliberately not read back
+    # from the role: this playbook is meant to check the deployment against the
+    # platform's real layout, so importing the role's own idea of where things
+    # are would make the assertions agree with themselves. Debian versions the
+    # service, binary and socket per interpreter; Red Hat installs one PHP and
+    # names all three without a version.
+    - name: Derive the platform's PHP-FPM service, socket and binary
+      ansible.builtin.set_fact:
+        verify_fpm_service: >-
+          {{ 'php-fpm.service' if ansible_os_family == 'RedHat'
+             else 'php' ~ (verify_php_version.stdout | trim) ~ '-fpm.service' }}
+        verify_fpm_socket: >-
+          {{ '/run/php-fpm/www.sock' if ansible_os_family == 'RedHat'
+             else '/run/php/php' ~ (verify_php_version.stdout | trim) ~ '-fpm.sock' }}
+        verify_fpm_binary: >-
+          {{ 'php-fpm' if ansible_os_family == 'RedHat'
+             else 'php-fpm' ~ (verify_php_version.stdout | trim) }}
+
     - name: Assert PHP-FPM is running
       ansible.builtin.assert:
         that:
-          - ansible_facts.services[fpm_service].state == 'running'
-        fail_msg: "{{ fpm_service }} is not running."
-      vars:
-        fpm_service: "php{{ verify_php_version.stdout | trim }}-fpm.service"
+          - ansible_facts.services[verify_fpm_service].state == 'running'
+        fail_msg: "{{ verify_fpm_service }} is not running."
 
     - name: Assert the PHP-FPM socket exists
       ansible.builtin.stat:
-        path: "/run/php/php{{ verify_php_version.stdout | trim }}-fpm.sock"
+        path: "{{ verify_fpm_socket }}"
       register: verify_socket
       failed_when: not verify_socket.stat.exists
+
+    # The vhost points fastcgi_pass at this socket, and nginx runs as the web
+    # server account. On Red Hat the packaged pool listens on a socket owned by
+    # `apache` and reachable only through a POSIX ACL, so a pool left at its
+    # packaged identity produces a 502 on every request -- which this catches
+    # directly rather than inferring it from the front page happening to load.
+    - name: Assert the web server can reach the PHP-FPM socket
+      ansible.builtin.command:
+        cmd: "test -r {{ verify_fpm_socket }} -a -w {{ verify_fpm_socket }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      changed_when: false
 
     - name: Request the site front page
       ansible.builtin.uri:
@@ -495,16 +591,123 @@
 
 
     #
+    # SELinux -- only checked where it is enforcing, which today means RHEL
+    #
+    # These assert the labels rather than the behaviour, because the behaviour
+    # they gate is already asserted above: a site that boots, serves a rendered
+    # front page and completes a cron run has demonstrably reached its database
+    # and written to its files directory. What the labels catch is the case
+    # where all of that works because SELinux is in permissive mode, which would
+    # break the moment anyone set it back to enforcing.
+    #
+
+    - name: Verify the SELinux configuration
+      when: ansible_selinux.status | default('disabled') == 'enabled'
+      block:
+
+        - name: Assert SELinux is enforcing, not merely enabled
+          ansible.builtin.assert:
+            that:
+              - ansible_selinux.mode == 'enforcing'
+            fail_msg: >-
+              SELinux is in {{ ansible_selinux.mode }} mode, so every context
+              assertion below would pass whether or not the labels are right.
+
+        # Read with `stat -c %C` rather than the stat module: the module only
+        # populates a context field when its target-side SELinux bindings are
+        # importable, and returns the dict without it otherwise -- so an
+        # assertion on the module's output fails with a Jinja attribute error on
+        # exactly the hosts where it matters most, instead of reporting a label.
+        - name: Read the SELinux type of each path that matters
+          ansible.builtin.command:
+            cmd: "stat -c %C {{ item.path }}"
+          register: verify_selinux_labels
+          changed_when: false
+          loop:
+            - path: "{{ verify_base_path }}/web/sites/default/files"
+              type: httpd_sys_rw_content_t
+              why: >-
+                Drupal cannot write uploads, image derivatives or its Twig cache
+                under an enforcing policy, and the error it raises names none of
+                that.
+            - path: "{{ verify_base_path }}/config/sync"
+              type: httpd_sys_rw_content_t
+              why: Configuration export fails with a permission error that does not mention SELinux.
+            # The rest of the tree must NOT be writable by the web server. If
+            # this ever reports the rw type, a relabel has been applied too
+            # broadly and a file upload bug becomes code execution.
+            - path: "{{ verify_base_path }}/web/index.php"
+              type: httpd_sys_content_t
+              why: Anything else means the web server can rewrite its own code.
+            # systemd refuses to exec a file typed as content, which is what
+            # everything under /var/www inherits. The cron timer dies with
+            # 203/EXEC and a "Permission denied" naming a file that is plainly
+            # mode 0755.
+            - path: "{{ verify_base_path }}/vendor/bin/drush"
+              type: bin_t
+              why: The drupal-cron systemd unit cannot execute it.
+          loop_control:
+            label: "{{ item.path }}"
+
+        - name: Assert every path carries the type the policy needs
+          ansible.builtin.assert:
+            that:
+              - (item.stdout | trim).split(':')[2] == item.item.type
+            fail_msg: >-
+              {{ item.item.path }} is labelled
+              {{ (item.stdout | trim).split(':')[2] }}, expected
+              {{ item.item.type }}. {{ item.item.why }}
+          loop: "{{ verify_selinux_labels.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+
+        - name: Read the SELinux booleans the stack depends on
+          ansible.builtin.command:
+            cmd: "getsebool {{ webserver_selinux_booleans | default(['httpd_can_network_connect_db']) | join(' ') }}"
+          register: verify_selinux_booleans
+          changed_when: false
+
+        - name: Assert those booleans are on
+          ansible.builtin.assert:
+            that:
+              - verify_selinux_booleans.stdout is not search('--> off')
+            fail_msg: >-
+              An SELinux boolean the stack needs is off:
+              {{ verify_selinux_booleans.stdout_lines | select('search', '--> off') | join(', ') }}
+
+
+    #
+    # firewalld -- only checked where it is running
+    #
+
+    - name: Assert the web ports are open in firewalld
+      ansible.builtin.command:
+        cmd: firewall-cmd --list-services
+      register: verify_firewalld
+      changed_when: false
+      failed_when: >-
+        'http' not in verify_firewalld.stdout.split()
+        or (verify_tls_enabled and 'https' not in verify_firewalld.stdout.split())
+      when: ansible_facts.services['firewalld.service'].state | default('') == 'running'
+
+
+    #
     # PHP tuning
     #
 
     # `php-fpm -i` reports the FPM SAPI's own configuration. Reading these
-    # through drush or `php` would report the CLI SAPI instead, which loads a
-    # different conf.d and forces max_execution_time to 0 -- so a CLI-based
-    # check would pass even if the FPM drop-in were missing entirely.
+    # through drush or `php` would report the CLI SAPI instead, which on Debian
+    # loads a different conf.d and in any case forces max_execution_time to 0 --
+    # so a CLI-based check would pass even if the FPM drop-in were missing
+    # entirely.
+    #
+    # Red Hat has a single flat /etc/php.d shared by every SAPI, so that
+    # particular trap does not exist there. The assertion is still made through
+    # the FPM binary on both, because what matters is what PHP-FPM loaded, not
+    # what some other interpreter would have.
     - name: Read the effective PHP-FPM settings
       ansible.builtin.command:
-        cmd: "php-fpm{{ verify_php_version.stdout | trim }} -i"
+        cmd: "{{ verify_fpm_binary }} -i"
       register: verify_php_ini
       changed_when: false
 
@@ -532,6 +735,39 @@
           memory_limit={{ verify_php['memory_limit'] | default('?') }}
           max_execution_time={{ verify_php['max_execution_time'] | default('?') }}
           opcache={{ verify_php['opcache.enable'] | default('?') }}
+
+    # The pool's run-as identity, read from the running processes rather than
+    # from the pool file, because the file only says what should happen. Red
+    # Hat's packaged pool runs as `apache`; everything under the Drupal tree is
+    # owned by the web server account, so a pool left at the packaged identity
+    # serves pages right up until Drupal first writes a cache entry and then
+    # fails in a way that reads as a Drupal bug rather than a permissions one.
+    # Selected on the worker process title rather than the executable name:
+    # `ps -C php-fpm` matches nothing on Debian, where the binary is versioned
+    # (php-fpm8.5), so it would report no workers at all. The title "php-fpm:
+    # pool www" is set by FPM itself and is identical everywhere. Filtering to
+    # pool workers also drops the master, which runs as root by design.
+    - name: Read the user PHP-FPM workers run as
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          ps -eo user=,args=
+          | awk '$2 == "php-fpm:" && $3 == "pool" { print $1 }'
+          | sort -u
+        executable: /bin/bash
+      register: verify_fpm_users
+      changed_when: false
+      failed_when: verify_fpm_users.stdout | trim | length == 0
+
+    - name: Assert PHP-FPM workers run as the web server account
+      ansible.builtin.assert:
+        that:
+          - verify_fpm_users.stdout_lines | unique == [verify_webserver_user]
+        fail_msg: >-
+          PHP-FPM workers run as
+          {{ verify_fpm_users.stdout_lines | unique | join(', ') | default('nobody', true) }}
+          but the Drupal tree is owned by {{ verify_webserver_user }}. Drupal
+          will fail on its first write under sites/default/files.
 
     - name: Assert APCu is available to the FPM SAPI
       ansible.builtin.assert:

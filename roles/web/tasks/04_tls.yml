@@ -1,5 +1,25 @@
 ---
 
+# RHEL 9 has no certbot in BaseOS or AppStream -- it lives in EPEL, which this
+# role does not enable, because adding a third-party repository to a
+# subscription-managed host is the operator's decision and not a side effect of
+# deploying a CMS. Even with EPEL present the renewal timer is named
+# certbot-renew.timer rather than certbot.timer, so the code below would need a
+# second, untested path.
+#
+# Failing here is the honest outcome: TLS on Red Hat is unimplemented, not
+# broken. Everything else in these roles works on RHEL, and a host that
+# terminates TLS at a load balancer or reverse proxy needs none of this.
+- name: Fail clearly when TLS is requested on a platform it is not implemented for
+  ansible.builtin.fail:
+    msg: >-
+      webserver_tls_enabled is true, but Let's Encrypt support in these roles is
+      implemented for Debian-family hosts only. RHEL ships no certbot outside
+      EPEL and names its renewal timer differently, and shipping that path
+      without a way to test it is how untested code reaches production.
+      Terminate TLS in front of this host, or set webserver_tls_enabled: false.
+  when: ansible_os_family != 'Debian'
+
 - name: Assert the TLS settings are usable
   ansible.builtin.assert:
     that:

@@ -27,6 +27,10 @@ webserver_max_body_size: 64M
 # TLS via Let's Encrypt. Requires webserver_sitename to be a public hostname
 # that resolves to this server, with port 80 reachable from the internet for
 # the ACME HTTP-01 challenge. Enabling this redirects all HTTP to HTTPS.
+#
+# Debian-family hosts only. RHEL ships no certbot outside EPEL, so enabling this
+# on a Red Hat host fails with an explanation rather than deploying an untested
+# path -- terminate TLS in front of the host instead.
 webserver_tls_enabled: false
 
 # Address Let's Encrypt registers and sends expiry notices to. Defaults to
@@ -48,10 +52,16 @@ webserver_tls_challenge: http-01
 # (production allows only 5 duplicate certificates per week).
 webserver_tls_staging: false
 
-# The account the web server runs as. Ubuntu's nginx package uses www-data;
-# there is rarely a reason to change this.
-webserver_user: www-data
-webserver_group: www-data
+# The account the web server runs as. Left unset on purpose: the default is
+# derived from the distribution, because the nginx package creates a different
+# account on each -- www-data on Ubuntu, nginx on RHEL -- and a value hardcoded
+# here would be wrong on one of them. Setting it to www-data on a RHEL host
+# gives a site that installs cleanly and then cannot write a single cache entry.
+#
+# Override only if you run nginx as something other than the account its own
+# package created.
+# webserver_user: www-data
+# webserver_group: www-data
 
 
 #
@@ -72,7 +82,11 @@ php_max_execution_time: 60
 php_opcache_memory_consumption: 192
 php_apcu_shm_size: 64M
 
-# AVIF support in GD -- OPT IN, DISABLED BY DEFAULT.
+# AVIF support in GD -- OPT IN, DISABLED BY DEFAULT, UBUNTU ONLY.
+#
+# Not available on RHEL, which ships no libavif in BaseOS or AppStream and so
+# has nothing for the build below to link against. Enabling it there fails with
+# that explanation; the GD warning on the status report is permanent instead.
 #
 # Ubuntu ships libgd2 without libavif deliberately (LP#2031934) and will not fix
 # it for a released version -- true of 24.04 and 26.04 alike -- so Drupal 11.2+
@@ -164,6 +178,11 @@ drupal_backup_retention_days: 14
 
 drupal_admin: admin
 drupal_admin_password: CHANGEME   # SECRET
+
+# Address on the uid 1 account, and so where its password reset link goes.
+# Defaults to drupal_email (the site's own "from" address). Set it only if the
+# administrator's address should differ from the site's.
+# drupal_admin_email: admin@example.com
 
 # Drupal 12 will default this to FALSE. Setting it explicitly clears a status
 # report warning and pins the behaviour across a major upgrade. Set true to keep

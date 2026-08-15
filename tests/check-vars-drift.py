@@ -24,6 +24,15 @@ a fresh clone) it checks the sample on its own: every key the sample documents
 should have a role default behind it, or omitting that key leaves the variable
 undefined at runtime.
 
+In both modes it also checks that every role defaults every configuration
+variable it uses. Role defaults do not carry across plays, and site.yml runs its
+four roles in four separate plays, so a variable defaulted only in roles/db is
+undefined by the time roles/drupal renders settings.php with it. That works
+anyway for anyone whose group_vars happens to set the key -- which is everyone
+following the README -- and fails for anyone who does not, inside a no_log task,
+with an error that does not name the variable. This is the check that makes each
+role stand on its own instead of depending on where its caller keeps its vars.
+
 Usage:
     tests/check-vars-drift.py
     tests/check-vars-drift.py --sample-only
@@ -36,6 +45,7 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import re
 import sys
 
 try:
@@ -101,6 +111,100 @@ def role_defaults() -> dict:
     return found
 
 
+# Keys within a task file whose value is a bare Jinja expression with no braces.
+CONDITIONAL_KEYS = ("when", "failed_when", "changed_when", "that", "loop", "with_items")
+
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+JINJA_SPAN = re.compile(r"\{\{(.*?)\}\}|\{%(.*?)%\}", re.S)
+
+
+def expressions(path: str) -> str:
+    """Every Jinja expression in a file, concatenated.
+
+    Only expressions, never whole lines: a comment that happens to name a
+    variable is prose, not a dependency, and treating it as one would make this
+    check cry wolf until somebody switched it off.
+    """
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+
+    spans = []
+    if path.endswith((".yml", ".yaml")):
+        lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+        text = "\n".join(lines)
+        # Conditionals are Jinja without the braces, so they are not caught below.
+        for line in lines:
+            stripped = line.strip().lstrip("- ")
+            for key in CONDITIONAL_KEYS:
+                if stripped.startswith(f"{key}:"):
+                    spans.append(stripped.split(":", 1)[1])
+
+    for match in JINJA_SPAN.finditer(text):
+        spans.append(match.group(1) or match.group(2) or "")
+    return "\n".join(spans)
+
+
+def role_dependencies(role: str, surface: set[str]) -> list[str]:
+    """Config variables a role uses but does not default itself.
+
+    Role defaults do not carry across plays. site.yml runs common, web, db and
+    drupal in four separate plays, so a variable defaulted only in roles/db is
+    simply undefined when roles/drupal renders settings.php with it -- and the
+    failure surfaces inside a no_log task as an unexplained error. Every role
+    has to stand on its own.
+
+    A reference guarded by `| default(...)` carries its own fallback and does
+    not need one in defaults/.
+    """
+    own = set(load(os.path.join(REPO, "roles", role, "defaults", "main.yml")))
+    text = "\n".join(
+        expressions(path)
+        for pattern in ("tasks/*.yml", "handlers/*.yml", "templates/*")
+        for path in sorted(glob.glob(os.path.join(REPO, "roles", role, pattern)))
+    )
+
+    missing = []
+    for name in sorted(set(IDENTIFIER.findall(text)) & surface):
+        if name in own:
+            continue
+        total = len(re.findall(rf"\b{name}\b", text))
+        guarded = len(re.findall(rf"\b{name}\s*\|\s*default\s*\(", text))
+        if total > guarded:
+            missing.append(name)
+    return missing
+
+
+def check_role_self_sufficiency(sample: dict, defaults: dict) -> int:
+    """Assert no role depends on another role's defaults across a play boundary."""
+    surface = set(defaults) | set(sample)
+    roles = sorted(
+        os.path.basename(os.path.dirname(os.path.dirname(path)))
+        for path in glob.glob(os.path.join(REPO, "roles", "*", "defaults", "main.yml"))
+    )
+
+    gaps: dict[str, list[str]] = {}
+    for role in roles:
+        # Secrets are deliberately undefaulted: the playbook asserts they are
+        # set, so a missing password fails loudly rather than silently
+        # provisioning a predictable account.
+        missing = [n for n in role_dependencies(role, surface) if not is_secret(n)]
+        if missing:
+            gaps[role] = missing
+
+    if not gaps:
+        print(f"{GREEN}Every role defaults every config variable it uses.{RESET}")
+        return 0
+
+    print(f"{RED}Roles depending on a variable they do not default ({sum(map(len, gaps.values()))}){RESET}")
+    print("  Role defaults do not carry across plays, so these are undefined at")
+    print("  run time for anyone whose group_vars does not happen to set them.")
+    for role, missing in gaps.items():
+        for name in missing:
+            source = defaults[name][1] if name in defaults else "nowhere"
+            print(f"  - roles/{role} uses {name}, defaulted in {source}")
+    return 1
+
+
 def mentioned_in_comments(key: str, text: str) -> bool:
     """True when the sample documents a key as a commented-out example.
 
@@ -156,7 +260,7 @@ def main() -> int:
     defaults = role_defaults()
 
     if args.sample_only or not os.path.exists(LIVE):
-        return check_sample_only(sample, defaults)
+        return check_sample_only(sample, defaults) | check_role_self_sufficiency(sample, defaults)
 
     live = load(LIVE)
     sample_text = open(SAMPLE, encoding="utf-8").read()
@@ -215,9 +319,15 @@ def main() -> int:
             print(f"  - {key}: sample {show(key, sample[key])} -> yours {show(key, live[key])}")
         print()
 
+    rc = check_role_self_sufficiency(sample, defaults)
+    print()
+
     if actionable or undocumented:
         print(f"{RED}Drift found that is worth acting on.{RESET}")
         return 1
+
+    if rc:
+        return rc
 
     print(f"{GREEN}No drift worth acting on.{RESET}")
     return 0

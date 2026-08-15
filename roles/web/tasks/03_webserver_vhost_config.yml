@@ -30,17 +30,22 @@
     group: "{{ webserver_group }}"
     mode: "0755"
 
+# Both empty on Red Hat, where nginx.conf includes conf.d/*.conf directly and
+# the packaged default server is part of that conffile rather than a separate
+# enabled site. See webserver_vhost_path in defaults for why it is left alone.
 - name: Disable the Nginx default site
   ansible.builtin.file:
-    path: /etc/nginx/sites-enabled/default
+    path: "{{ webserver_default_site }}"
     state: absent
+  when: webserver_default_site | length > 0
   notify: Restart nginx
 
 - name: Enable the Drupal Nginx site
   ansible.builtin.file:
-    src: /etc/nginx/sites-available/drupal
-    dest: /etc/nginx/sites-enabled/drupal
+    src: "{{ webserver_vhost_path }}"
+    dest: "{{ webserver_vhost_link }}"
     state: link
+  when: webserver_vhost_link | length > 0
   notify: Restart nginx
 
 # Runs after the symlink is in place so it tests the configuration nginx will

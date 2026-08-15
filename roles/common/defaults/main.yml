@@ -1,23 +1,35 @@
 ---
-# Ubuntu releases these roles will deploy to.
+# Platforms these roles will deploy to.
+#
+# Ubuntu is identified by release codename because that is what its package
+# archive is keyed on. RHEL has no codename that means anything to dnf, so it is
+# identified by distribution and major version. roles/common/tasks/main.yml
+# composes the running host's identifier into common_platform.
 common_supported_releases:
-  - noble      # 24.04 LTS -- PHP 8.3, MariaDB 10.11
-  - resolute   # 26.04 LTS -- PHP 8.5, MariaDB 11.8
+  - noble      # Ubuntu 24.04 LTS -- PHP 8.3, MariaDB 10.11
+  - resolute   # Ubuntu 26.04 LTS -- PHP 8.5, MariaDB 11.8
+  - redhat9    # RHEL 9.x -- PHP 8.3, MariaDB 10.11, nginx 1.26 (module streams)
 
-# Releases covered by a green integration run in CI. Anything supported but not
-# listed here warns at the start of the play. Both entries are blocking legs of
-# the integration workflow, so this list and CI cannot drift apart silently.
+# Platforms covered by a green integration run in CI. Anything supported but not
+# listed here warns at the start of the play. Both Ubuntu entries are blocking
+# legs of the integration workflow, so this list and CI cannot drift apart
+# silently. RHEL is deliberately absent: GitHub offers no RHEL runner, so it is
+# validated by hand against a real 9.7 host and the README says so rather than
+# claiming a guarantee no CI leg backs up.
 common_tested_releases:
   - noble
   - resolute
 
-# Web server run-as identity. Ubuntu's nginx package runs as www-data and
-# creates this user/group itself.
-webserver_user: www-data
-webserver_group: www-data
+# Web server run-as identity, which differs by distribution: Debian's nginx
+# package runs as www-data, Red Hat's as nginx. Both packages create the account
+# themselves. Derived rather than hardcoded so a host does not have to state it,
+# and left as a default so group_vars can still override it.
+webserver_user: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
+webserver_group: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
 
-# Packages needed by later roles (Composer needs unzip/git, MySQL modules need
-# python3-pymysql, which is installed by the db role).
+# Packages needed by later roles (Composer needs unzip/git, the MySQL modules
+# need PyMySQL, which is installed by the db role). Every name here happens to
+# be identical on Debian and Red Hat.
 common_packages:
   # acl lets Ansible hand a temp file to an unprivileged become_user without
   # making it world readable. Drush runs as the web server account so that its
@@ -28,3 +40,14 @@ common_packages:
   - git
   - python3
   - unzip
+
+# Red Hat only. SELinux is enforcing and firewalld is running on a stock RHEL 9
+# install, and the ansible.posix modules that manage them are thin wrappers over
+# Python bindings that have to be present on the target before they can be
+# called. Installed here, in the play that runs against every host, rather than
+# in roles/web where they are used, because a module that cannot import its
+# bindings fails in a way that does not name the missing package.
+common_packages_redhat:
+  - policycoreutils-python-utils   # semanage, for ansible.posix.sefcontext
+  - python3-firewall               # for ansible.posix.firewalld
+  - python3-libselinux             # for ansible.posix.seboolean and file contexts

@@ -7,7 +7,7 @@ Ansible roles that install a default Drupal instance (latest stable release) wit
 required configuration and dependencies. At a high level this installs:
 
 - nginx
-- PHP + PHP-FPM (8.3 on 24.04, 8.5 on 26.04)
+- PHP + PHP-FPM (8.3 on 24.04 and RHEL 9, 8.5 on 26.04)
 - MariaDB
 - Composer
 - Drush
@@ -19,7 +19,7 @@ The goal is a base Drupal install with no errors on the status report.
 
 ### Compatibility
 
-**Ubuntu 24.04 LTS (noble) and 26.04 LTS (resolute).**
+**Ubuntu 24.04 LTS (noble), Ubuntu 26.04 LTS (resolute) and RHEL 9.**
 
 **nginx and MariaDB only.** Apache support was removed — it was never tested, and every
 feature (TLS, PHP tuning, the GD build) had to carry a second untested code path. Anyone
@@ -27,25 +27,65 @@ still setting `webserver_type` gets an explicit error rather than a silent subst
 The database is MariaDB; the roles assert the running server reports `MariaDB` and that
 no MySQL or Percona packages are installed.
 
-The `common` role asserts the OS and fails immediately on anything else. Both releases
-are exercised by a blocking CI leg on every push, so this list and CI cannot drift apart.
-Earlier Ubuntu releases are not supported — 18.04/20.04 were dropped along with the
+The `common` role asserts the platform and fails immediately on anything else. The two
+Ubuntu releases are exercised by a blocking CI leg on every push, so that list and CI
+cannot drift apart. RHEL is not, because GitHub offers no RHEL runner — it is validated
+by hand, and the table below says so rather than implying a guarantee nothing enforces.
+Every deploy onto a platform without a CI leg prints an EXPERIMENTAL warning naming that
+gap. Earlier Ubuntu releases are not supported — 18.04/20.04 were dropped along with the
 workarounds they needed.
 
-#### Platform compatibility matrix
+#### Support matrix
 
 | Platform | Status | PHP | MariaDB | nginx | Notes |
 |---|---|---|---|---|---|
 | Ubuntu 24.04 LTS (noble) | **Supported** — blocking CI leg | 8.3 | 10.11 | 1.24 | Reference platform |
 | Ubuntu 26.04 LTS (resolute) | **Supported** — blocking CI leg | 8.5 | 11.8 | 1.28 | No `php-opcache` package; OPcache is built into PHP 8.5 |
-| RHEL 9.7 | *Planned* | 8.3 (AppStream stream) | 10.11 (module stream) | 1.22 | Needs a `dnf` port and SELinux work — see below |
+| RHEL 9 | **Validated by hand** — no CI leg | 8.3 (module stream) | 10.11 (module stream) | 1.26 (module stream) | No TLS and no AVIF build; see below |
 | RHEL 8.10 | **Not viable** | 8.2 max | 10.11 | 1.14 | AppStream tops out at PHP 8.2; Drupal 11 requires 8.3 |
-| Rocky Linux 9 | *Future* | as RHEL 9 | as RHEL 9 | as RHEL 9 | Should follow the RHEL 9 port almost unchanged |
+| Rocky Linux 9 | *Future* | as RHEL 9 | as RHEL 9 | as RHEL 9 | Would likely need only an added platform identifier, but is untested |
 | Amazon Linux 2023 | *Future* | 8.4 (`php8.4` packages) | MariaDB 10.5 | 1.24 | Different package naming again; no module streams |
 | Ubuntu 18.04 / 20.04 / 22.04 | **Dropped** | — | — | — | Removed along with the workarounds they needed |
 
 "Supported" means a blocking CI leg deploys and verifies the whole stack on every
-push. Nothing else carries that guarantee.
+push. Nothing else carries that guarantee — including RHEL, which is listed as
+**validated by hand** precisely so the difference stays visible. What that means in
+practice: the full sequence below was run against a real RHEL 9.7 host, and the roles
+will not silently regress on Ubuntu because CI would catch it, but nothing automatically
+catches a RHEL regression between releases.
+
+Versions in the table above are what each platform shipped when it was last exercised:
+Ubuntu 26.04 and RHEL 9 were read off the running hosts, Ubuntu 24.04 off CI.
+
+#### Feature support by platform
+
+Everything the roles do works everywhere except the two entries marked otherwise, both
+of which fail with an explanation rather than deploying something untested.
+
+| Feature | Ubuntu 24.04 | Ubuntu 26.04 | RHEL 9 |
+|---|---|---|---|
+| nginx, PHP-FPM, MariaDB, Composer, Drush | Yes | Yes | Yes |
+| Drupal install, and `upgrade.yml` | Yes | Yes | Yes |
+| PHP tuning drop-in | Yes | Yes | Yes |
+| PHP-FPM pool tuning | Yes | Yes | Yes |
+| systemd cron timer | Yes | Yes | Yes |
+| systemd backup timer, and restore script | Yes | Yes | Yes |
+| argon2id password hashing | Yes | Yes | Yes |
+| Trusted host patterns | Yes | Yes | Yes |
+| **TLS via Let's Encrypt** | Yes | Yes | **No** — no certbot outside EPEL |
+| **AVIF GD build** (`php_gd_avif_build`) | Yes | Yes | **No** — no libavif to build against |
+| SELinux file contexts and booleans | n/a | n/a | Yes |
+| firewalld port management | n/a | n/a | Yes |
+| `php-opcache` as a separate package | Yes | n/a — built into PHP 8.5 | Yes |
+| `uploadprogress` extension | Yes | Yes | No — EPEL only, and not required |
+
+"n/a" means the platform has nothing for that feature to do, not that it is missing:
+Ubuntu ships no nginx AppArmor profile and no firewall rules, and PHP 8.5 builds OPcache
+into the interpreter. Neither case affects the deployed site.
+
+The two **No** entries are the only functional differences. A RHEL host that needs HTTPS
+should terminate TLS in front of it; a RHEL host that needs AVIF derivatives should use
+`php-imagick` with Drupal's ImageMagick toolkit.
 
 **Drupal versions.** Drupal 11 requires PHP 8.3 and recommends 8.4; Drupal 12 is
 expected to require 8.5. That requirement, not the distribution, is what decides
@@ -54,52 +94,94 @@ whether a platform is viable — it is why RHEL 8.10 is out.
 Package versions are what each distribution ships, but nothing here pins them. The PHP
 version is discovered at runtime and every derived path (the FPM socket, the service
 name, the `conf.d` directories) follows from it; the nginx vhost picks its `http2`
-syntax from the installed nginx; and optional PHP packages are probed with apt rather
-than assumed. Two differences are worth knowing about:
+syntax from the installed nginx; and optional PHP packages are probed with the platform's
+package manager rather than assumed. Three differences are worth knowing about:
 
 
 - **OPcache.** `php-opcache` is a separate package through PHP 8.4 but does not exist on
   26.04, where PHP 8.5 builds OPcache into the interpreter. Naming a missing package
-  aborts the whole apt transaction, so optional packages are installed only when apt
-  offers a candidate, and the play reports what it skipped.
+  aborts the whole transaction, so optional packages are installed only where the
+  package manager offers them, and the play reports what it skipped.
 - **AVIF.** Still absent from 26.04's `libgd3`, exactly as on 24.04, so the opt-in
-  `php_gd_avif_build` remains relevant on both.
+  `php_gd_avif_build` remains relevant on both. It is unavailable on RHEL entirely.
+- **Package names.** Almost nothing PHP-related is named the same way on RHEL:
+  `php-mysql` is `php-mysqlnd`, APCu and zip are PECL builds, and there is no `php-curl`
+  at all because curl is compiled into `php-common`. The lists live side by side in
+  `roles/web/defaults/main.yml` rather than being translated at run time.
 
-#### Porting to RHEL 9.7 — what it involves
+#### RHEL 9
 
-Not started. Recording the shape of it so the cost is visible before anyone commits.
-Every role is Debian-specific today, so this is a port rather than a configuration
-change:
+Ported and validated by hand against a RHEL 9.7 host: a fresh install pinned to n-1,
+`tests/verify.yml`, a second deploy asserting zero changes, `upgrade.yml` moving the site
+to the current release, and `tests/verify.yml` again. There is no CI leg, so the matrix
+above says "validated by hand" rather than "supported", and the play prints an
+EXPERIMENTAL warning on every RHEL deploy.
 
-- **Package management.** `ansible.builtin.apt` appears in all four roles and becomes
-  `dnf`. Package names differ throughout (`php-fpm` vs `php-fpm`, but `php-mysql` vs
-  `php-mysqlnd`, `mariadb-server` in a module stream). PHP arrives through an AppStream
-  module stream that has to be enabled explicitly, which has no apt equivalent.
-- **Paths.** `/etc/php/<version>/{cli,fpm}/conf.d` becomes `/etc/php.d` with a single
-  flat directory and no per-SAPI split — which quietly invalidates the FPM-vs-CLI
-  distinction `tests/verify.yml` deliberately tests. `/etc/mysql/mariadb.conf.d`
-  becomes `/etc/my.cnf.d`. The FPM socket path and the service name both change.
-- **SELinux.** The largest piece, and the one with no Debian counterpart. The docroot
-  needs `httpd_sys_content_t`, `sites/default/files` and the config sync directory need
-  `httpd_sys_rw_content_t`, and nginx needs `httpd_can_network_connect_db` to reach
-  MariaDB over a socket. Getting this wrong produces permission errors that look
-  nothing like permission errors.
-- **Firewall.** `firewalld` is active by default and will block ports 80 and 443, which
-  Ubuntu does not do.
-- **MariaDB root authentication.** The `unix_socket` plugin is not configured the same
-  way, so the "no root password anywhere" property this repo relies on needs
-  re-establishing rather than assuming.
-- **CI.** GitHub does not offer RHEL runners. Coverage means a self-hosted runner, or a
-  container with systemd, or dropping to Rocky/Alma as a stand-in — and a container
-  reintroduces exactly the systemd-in-Docker problems the current CI design avoids.
+The roles branch on `ansible_os_family` rather than forking. Most of the stack — Composer,
+Drush, Drupal, the systemd units, the backup and restore scripts — was already
+OS-agnostic and is untouched.
 
-Rocky Linux 9 should follow almost unchanged once RHEL 9 works, since the divergence is
-branding rather than packaging. Amazon Linux 2023 is a third dialect again: no module
-streams, versioned `php8.4` package names, and its own MariaDB packaging.
+**What is different on RHEL**
 
-The honest estimate is days rather than hours, and it permanently doubles the surface
-that every future feature has to carry — the same cost that made Apache support worth
-deleting. Worth doing if RHEL is a real deployment target; not worth doing speculatively.
+- **Module streams.** AppStream's non-modular defaults are PHP 8.0 and MariaDB 10.5, both
+  below Drupal 11's floor. `php:8.3`, `mariadb:10.11` and `nginx:1.26` are enabled
+  explicitly before anything is installed. Enabling a stream also pins it, so dnf will
+  not later move the host onto a different one.
+- **Run-as account.** nginx runs as `nginx`, not `www-data`, and the packaged PHP-FPM
+  pool runs as `apache` — a leftover of httpd being the assumed front end. The pool is
+  repointed at the web server account, along with PHP's session and OPcache directories,
+  which the packaging creates owned by `apache`. Leaving that alone produces a site that
+  serves pages and then fails at its first cache write.
+- **Paths.** `/etc/php.d` is flat and shared by every SAPI, so there is no CLI-vs-FPM
+  split to get wrong; the drop-in is written once. The FPM socket is
+  `/run/php-fpm/www.sock` and the service is `php-fpm`, both unversioned. The MariaDB
+  socket is `/var/lib/mysql/mysql.sock` and its drop-in directory `/etc/my.cnf.d`. nginx
+  has no `sites-available`, so the vhost is written straight into `conf.d`.
+- **SELinux.** Enforcing, and left that way. The stock policy already labels
+  `/var/www(/.*)?` as `httpd_sys_content_t`, so the codebase needs nothing; the two
+  directories Drupal writes to get `httpd_sys_rw_content_t`, and
+  `httpd_can_network_connect_db` is turned on so PHP-FPM can reach MariaDB. One case is
+  easy to miss: `vendor/bin/drush` inherits a *content* type, and systemd refuses to
+  execute a content type, so the cron timer dies with `203/EXEC` and a "Permission
+  denied" naming a file that is plainly mode 0755. Composer's `vendor/bin` is therefore
+  labelled `bin_t`, which is what those files actually are. `tests/verify.yml` asserts
+  all four labels.
+- **firewalld.** Active by default and blocking port 80, which Ubuntu does not do. Opened
+  permanently and immediately — permanent alone writes the zone file without applying it,
+  so the first deploy would finish with the port still shut.
+- **MariaDB root authentication.** The "no root password anywhere" property does hold on
+  RHEL, but not visibly: `mysql.user` reports root's plugin as `mysql_native_password`,
+  which reads like a password account. The real record in `mysql.global_priv` shows that
+  hash is the literal string `invalid` — unmatchable by any password — with `unix_socket`
+  as the alternative. The db role now asserts this on both platforms rather than assuming
+  it, because the alternative to checking is finding out later.
+- **`/usr/local/bin` is not on the sudo path.** RHEL's `secure_path` omits it, so Composer
+  is invoked by absolute path. Ubuntu's `secure_path` happens to include it, which is the
+  only reason a bare `composer` ever worked.
+
+**What is not available on RHEL**
+
+- **TLS.** `webserver_tls_enabled: true` fails with an explanation instead of deploying.
+  RHEL ships no certbot outside EPEL, and enabling a third-party repository on a
+  subscription-managed host is not a side effect a CMS deployment should have. With EPEL
+  the renewal timer is also named differently, so supporting it means a second code path
+  with no way to test it — the cost that made Apache support worth deleting. Terminate
+  TLS in front of the host instead.
+- **The AVIF GD build.** `php_gd_avif_build: true` fails likewise. The build works by
+  rebuilding the distribution's own libgd source package against libavif, and RHEL 9
+  ships no libavif in BaseOS or AppStream. The GD warning on the status report is
+  therefore permanent there; `php-imagick` with Drupal's ImageMagick toolkit is the
+  alternative if you need AVIF derivatives.
+
+**CI.** GitHub offers no RHEL runner. The options are a self-hosted runner, a
+Rocky/Alma container — which reintroduces exactly the systemd-in-Docker problems the
+current design avoids, and this stack is mostly systemd units — or accepting manual
+validation and labelling it as such, which is what the matrix does.
+
+Rocky Linux 9 and AlmaLinux 9 would likely need no more than an added entry in
+`common_supported_releases`, since they share RHEL's packaging, but neither has been
+tested and so neither is listed as working. Amazon Linux 2023 is a third dialect again:
+no module streams, versioned `php8.4` package names, and its own MariaDB packaging.
 
 
 ### Requirements
@@ -115,8 +197,11 @@ ansible-galaxy collection install -r requirements.yml
 
 On the **target server**:
 
-- Ubuntu 24.04 LTS or 26.04 LTS with `python3` (present by default on Ubuntu Server)
+- Ubuntu 24.04 LTS, Ubuntu 26.04 LTS, or RHEL 9, with `python3` (present by default on
+  Ubuntu Server and on RHEL)
 - An SSH account with `sudo` access
+- On RHEL: an active subscription, since PHP, MariaDB and nginx all come from AppStream.
+  No third-party repository is added or required.
 
 
 ### Setup
@@ -151,15 +236,26 @@ Put the secrets in `group_vars/vault.yml`, reference them from `group_vars/all`
 The playbook asserts both passwords are set and non-empty before it changes anything,
 and the tasks that consume them use `no_log`.
 
-There is no `db_root_password`. MariaDB's root account on Ubuntu authenticates through
-the `unix_socket` plugin, so administrative tasks connect over the local socket as
-system root. That is stronger than storing a root password in a vars file, and it means
-one less secret to manage.
+There is no `db_root_password`. MariaDB's root account authenticates through the
+`unix_socket` plugin on both platforms, so administrative tasks connect over the local
+socket as system root. That is stronger than storing a root password in a vars file, and
+it means one less secret to manage.
+
+The db role asserts this rather than assuming it, because on RHEL it is not visible from
+the obvious place: `mysql.user` reports root's plugin as `mysql_native_password`. The
+authoritative record in `mysql.global_priv` shows that entry's hash is the literal string
+`invalid`, which no password can produce, with `unix_socket` as the alternative. A
+platform that genuinely did not configure socket authentication would fail the assertion
+and say so, rather than having a stored root password quietly introduced to work around
+it.
 
 
 ### TLS
 
-Off by default. Enable it in `group_vars/all`:
+Off by default, and **Debian-family only** — see the RHEL section above for why enabling
+it on a Red Hat host fails with an explanation rather than deploying an untested path.
+
+Enable it in `group_vars/all`:
 
 ```yaml
 webserver_tls_enabled: true
@@ -191,6 +287,8 @@ webserver_tls_cloudflare_token: "{{ vault_cloudflare_token }}"
 The vhost emits `http2 on;` or the older `listen ... ssl http2` form depending on the
 installed nginx version — the standalone directive only exists from nginx 1.25.1, so
 24.04 (nginx 1.24) gets the listen-parameter form and 26.04 (nginx 1.28) the modern one.
+The version is read from the running binary, so RHEL's 1.26 would be handled too if TLS
+were available there.
 
 Set `webserver_tls_staging: true` while testing. It issues an untrusted certificate
 from the Let's Encrypt staging CA, which has far looser rate limits than production
@@ -199,11 +297,12 @@ from the Let's Encrypt staging CA, which has far looser rate limits than product
 
 ### PHP tuning
 
-PHP settings are written as a drop-in at `/etc/php/<version>/{cli,fpm}/conf.d/99-drupal.ini`.
-The packaged `php.ini` is never edited, so a PHP package upgrade cannot produce a
-conffile prompt or silently revert these values.
+PHP settings are written as a drop-in named `99-drupal.ini`, in
+`/etc/php/<version>/{cli,fpm}/conf.d` on Ubuntu and in the flat, SAPI-shared `/etc/php.d`
+on RHEL. The packaged `php.ini` is never edited, so a PHP package upgrade cannot produce
+a conffile prompt or silently revert these values.
 
-Ubuntu's stock `memory_limit` (128M) and `max_execution_time` (30) are both low for
+The stock `memory_limit` (128M) and `max_execution_time` (30) are both low for
 Drupal with a real module set, and `max_input_vars` (1000) silently truncates large
 admin forms. The defaults here raise those, enable and size OPcache and APCu, and
 grow the realpath cache. See `roles/web/defaults/main.yml` for the full list.
@@ -289,9 +388,20 @@ rather than a PHP error, that Drupal bootstraps, that the hash salt is non-empty
 where Drupal actually looks for it. It also reports any error-severity items on the
 Drupal status report.
 
-PHP settings are read via `php-fpm -i` rather than the `php` CLI, because the two SAPIs
-load different `conf.d` directories — a CLI-based check would pass even if the FPM
-drop-in were missing entirely.
+PHP settings are read via `php-fpm -i` rather than the `php` CLI. On Ubuntu the two
+SAPIs load different `conf.d` directories, so a CLI-based check would pass even if the
+FPM drop-in were missing entirely; RHEL shares one directory and so does not have that
+trap, but the check goes through FPM on both, because what matters is what PHP-FPM
+actually loaded.
+
+On RHEL it additionally asserts that SELinux is enforcing rather than merely enabled —
+otherwise every label assertion would pass regardless — that the four paths whose labels
+matter carry the right types, that the SELinux booleans the stack needs are on, and that
+firewalld is actually allowing the web ports.
+
+It also refuses to run if the host is listening on port 443 while `webserver_tls_enabled`
+is false. That combination means the TLS variables did not reach the playbook, and every
+TLS assertion would be skipped while the run still reported success.
 
 When `webserver_tls_enabled` is true it additionally checks the HTTP-to-HTTPS redirect,
 the certificate chain, HSTS, that Drupal is emitting `https://` URLs, that TLS 1.0/1.1
@@ -335,13 +445,26 @@ paste into an issue.
 With no `group_vars/all` present it checks the sample alone, asserting every documented
 key has a role default behind it. The lint workflow runs it in that mode.
 
+In both modes it also asserts that **every role defaults every configuration variable it
+uses**. Role defaults do not carry across plays and `site.yml` runs its four roles in
+four separate plays, so a variable defaulted only in `roles/db` is undefined by the time
+`roles/drupal` renders `settings.php` with it. That still works for anyone whose
+`group_vars/all` sets the key — which is everyone who copied the sample — and fails for
+anyone who does not, inside a `no_log` task, with an error that does not name the
+variable. Keeping each role self-sufficient is what stops the deployment depending on
+where its caller happens to keep its variables.
+
+That dependency is easy to reintroduce, because it is invisible until someone runs the
+roles a different way. The check exists so CI notices instead of a user.
+
 #### Continuous integration
 
 Two GitHub Actions workflows run on every push and pull request:
 
 - **Lint** — `yamllint` and `ansible-lint` at the `production` profile.
 - **Integration** — deploys the full stack and runs `tests/verify.yml`, as a matrix over
-  Ubuntu 24.04 and 26.04. Both legs block. The runners are themselves the target OS with
+  Ubuntu 24.04 and 26.04. Both legs block. There is no RHEL leg, because GitHub offers
+  no RHEL runner; see the RHEL section above for what is done instead. The runners are themselves the target OS with
   systemd, so the playbook runs against them directly rather than against a container;
   that avoids the systemd-in-Docker workarounds that would otherwise mask real problems
   with the timers and services this role installs.
@@ -480,7 +603,9 @@ by default are handled:
   `false` to match that future default so a major upgrade cannot silently change how
   forms validate. Set `drupal_enable_html5_validation: true` to keep browser-side
   validation on.
-- **AVIF / GD library** — *not fixable on Ubuntu 24.04, by vendor policy.* Ubuntu
+- **AVIF / GD library** — *not fixable from distribution packages on either platform.*
+  On RHEL there is simply no libavif in BaseOS or AppStream, so the warning is permanent
+  and the opt-in build below is rejected. On Ubuntu it is vendor policy: Ubuntu
   deliberately builds `libgd2` without libavif: `libgd2` is in main, libavif's Rust
   dependency tree keeps it in universe, and main packages cannot build-depend on
   universe ([LP#2031934](https://bugs.launchpad.net/ubuntu/+source/libgd2/+bug/2031934)
@@ -501,11 +626,15 @@ by default are handled:
   build — see below.
 
 
-### AVIF support in GD (opt-in, disabled by default)
+### AVIF support in GD (opt-in, disabled by default, Ubuntu only)
 
 Setting `php_gd_avif_build: true` compiles an AVIF-capable GD for PHP and clears the
 last status report warning. It is off by default and should stay off unless you have
 a concrete need for AVIF image derivatives.
+
+**Ubuntu only.** The whole approach depends on rebuilding the distribution's own libgd
+source package against libavif, and RHEL 9 ships neither, so enabling it on a Red Hat
+host fails with that explanation rather than attempting a build that cannot succeed.
 
 How it works: Ubuntu's own `debian/rules` already passes `--with-avif`, and
 `libavif-dev` is in the archive — the package simply is not built against it. The role

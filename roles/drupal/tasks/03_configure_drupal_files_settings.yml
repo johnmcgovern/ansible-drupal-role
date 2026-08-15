@@ -66,3 +66,35 @@
     owner: "{{ webserver_user }}"
     group: "{{ webserver_group }}"
     mode: "0770"
+
+# Red Hat only. Ownership and mode are not the whole story when SELinux is
+# enforcing: a directory can be owned by the web server account, mode 0770, and
+# still be unwritable because its type says it is static content. roles/web
+# registered the file context rules; this applies them, and it has to happen
+# here because restorecon needs the directories to exist.
+#
+# Composer created most of this tree as root after roles/web ran, so the whole
+# base path is relabelled rather than just the two writable directories -- new
+# files inherit their parent's type, and anything Composer wrote before the
+# rules existed would otherwise keep the type it inherited at the time.
+- name: Apply the SELinux file contexts to the Drupal tree
+  when:
+    - ansible_os_family == 'RedHat'
+    - drupal_selinux_relabel
+    - ansible_selinux.status | default('disabled') == 'enabled'
+  block:
+
+    # restorecon has no check mode and always exits 0, so the only way to know
+    # whether it would change anything -- and to avoid reporting changed on
+    # every single run -- is to ask it what it would do first.
+    - name: Check which files are mislabelled
+      ansible.builtin.command:
+        cmd: "restorecon -R -n -v {{ drupal_base_path }}"
+      register: drupal_selinux_pending
+      changed_when: false
+
+    - name: Relabel the mislabelled files  # noqa: no-handler
+      ansible.builtin.command:
+        cmd: "restorecon -R {{ drupal_base_path }}"
+      when: drupal_selinux_pending.stdout | trim | length > 0
+      changed_when: true

@@ -10,6 +10,9 @@ galaxy_info:
       versions:
         - noble
         - resolute
+    - name: EL
+      versions:
+        - "9"
   galaxy_tags:
     - drupal
     - composer

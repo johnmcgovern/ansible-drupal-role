@@ -12,7 +12,7 @@
 - name: Install Drupal with Composer
   ansible.builtin.command:
     cmd: >-
-      composer create-project
+      {{ composer_bin }} create-project
       drupal/recommended-project{{ (':' ~ drupal_version) if drupal_version else '' }}
       {{ drupal_base_path | basename }}
       --stability stable --no-interaction
@@ -31,7 +31,7 @@
 
 - name: Install Drush with Composer
   ansible.builtin.command:
-    cmd: composer require drush/drush --no-interaction
+    cmd: "{{ composer_bin }} require drush/drush --no-interaction"
     chdir: "{{ drupal_base_path }}"
   environment: "{{ drupal_composer_env }}"
   when: not drush_binary.stat.exists

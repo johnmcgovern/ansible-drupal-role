@@ -2,7 +2,7 @@
 
 - name: Check whether Composer is already installed
   ansible.builtin.stat:
-    path: /usr/local/bin/composer
+    path: "{{ composer_bin }}"
   register: composer_binary
 
 - name: Download the Composer installer
@@ -34,8 +34,11 @@
 
 - name: Run the Composer installer
   ansible.builtin.command:
-    cmd: php /tmp/composer-setup.php --install-dir=/usr/local/bin/ --filename=composer
-    creates: /usr/local/bin/composer
+    cmd: >-
+      php /tmp/composer-setup.php
+      --install-dir={{ composer_bin_dir }}
+      --filename={{ composer_bin | basename }}
+    creates: "{{ composer_bin }}"
 
 - name: Remove the Composer installer
   ansible.builtin.file:

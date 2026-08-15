@@ -13,9 +13,36 @@ db_name: drupal
 db_user: drupal_user
 db_user_perms: "SELECT,INSERT,UPDATE,DELETE,CREATE,DROP,INDEX,ALTER,CREATE TEMPORARY TABLES,LOCK TABLES"
 
-# Unix socket the local MariaDB server listens on. The root account authenticates
-# through the unix_socket plugin, so no root password is stored anywhere.
-db_login_unix_socket: /run/mysqld/mysqld.sock
+# Unix socket the local MariaDB server listens on. The root account
+# authenticates through the unix_socket plugin, so no root password is stored
+# anywhere; 01_install_mariadb.yml asserts that is still true rather than
+# assuming it. The path is a packaging choice and differs by distribution.
+db_login_unix_socket: >-
+  {{ '/var/lib/mysql/mysql.sock' if ansible_os_family == 'RedHat'
+     else '/run/mysqld/mysqld.sock' }}
+
+# Directory the server reads additional configuration from. Files load in name
+# order, so the 60- drop-in written there takes precedence over the packaged
+# 50-server.cnf (Debian) or mariadb-server.cnf (Red Hat).
+db_conf_dir: >-
+  {{ '/etc/my.cnf.d' if ansible_os_family == 'RedHat'
+     else '/etc/mysql/mariadb.conf.d' }}
+
+# Server and client packages. Red Hat calls the client package `mariadb`, not
+# `mariadb-client`, and takes MariaDB 10.11 from an AppStream module stream --
+# the non-modular default is 10.5, which is below Drupal 11's floor of 10.6.
+db_packages: >-
+  {{ ['mariadb-server', 'mariadb'] if ansible_os_family == 'RedHat'
+     else ['mariadb-server', 'mariadb-client'] }}
+
+# Red Hat only, and mandatory: without it dnf installs MariaDB 10.5.
+db_dnf_module_streams:
+  - {name: mariadb, stream: "10.11"}
+
+# The Python MySQL client library the ansible.mysql modules import. Red Hat
+# spells the package with the project's own capitalisation.
+db_python_mysql_package: >-
+  {{ 'python3-PyMySQL' if ansible_os_family == 'RedHat' else 'python3-pymysql' }}
 
 # db_user_password has no default on purpose -- an unset password should fail
 # loudly rather than silently create a predictable account.

@@ -1,0 +1,92 @@
+---
+# Red Hat only. Neither of these has a Debian counterpart: Ubuntu ships AppArmor
+# with no profile for nginx and no firewall rules at all, so on Debian this file
+# is not imported.
+
+#
+# SELinux
+#
+
+- name: Configure SELinux for the Drupal stack
+  when:
+    - webserver_selinux_manage
+    - ansible_selinux.status | default('disabled') == 'enabled'
+  block:
+
+    # PHP-FPM runs in httpd_t and reaches MariaDB over a local unix socket. The
+    # targeted policy denies that unless this boolean is on, and the denial
+    # surfaces as Drupal reporting it cannot connect to the database with
+    # nothing in the nginx or PHP-FPM logs to say why -- the reason is only in
+    # the audit log, which is not where anyone looks first.
+    - name: Allow the web server to reach the database
+      ansible.posix.seboolean:
+        name: "{{ item }}"
+        state: true
+        persistent: true
+      loop: "{{ webserver_selinux_booleans }}"
+
+    # The stock policy already labels /var/www(/.*)? httpd_sys_content_t, so the
+    # codebase Composer writes there inherits a type the web server can read and
+    # execute as a script. What it cannot know is which directories Drupal
+    # writes to at runtime; those need the rw type, and only those, so that a
+    # file upload bug cannot rewrite the codebase.
+    #
+    # The rules are registered here, before the directories exist -- semanage
+    # takes a path regex, not a path -- and roles/drupal relabels the tree once
+    # it has created them.
+    - name: Register the SELinux file contexts for the writable directories
+      community.general.sefcontext:
+        target: "{{ item }}(/.*)?"
+        setype: "{{ webserver_selinux_rw_type }}"
+        state: present
+      loop:
+        - "{{ drupal_base_path }}/web/sites/default/files"
+        - "{{ drupal_config_sync_path | default(drupal_base_path ~ '/config/sync') }}"
+
+    # The directory as well as its contents, so that the executables Composer
+    # writes there later -- every `composer require` refreshes vendor/bin --
+    # inherit the type instead of picking up the content type of the tree.
+    - name: Register the SELinux file context for the Composer executables
+      community.general.sefcontext:
+        target: "{{ drupal_base_path }}/vendor/bin(/.*)?"
+        setype: "{{ webserver_selinux_bin_type }}"
+        state: present
+
+#
+# firewalld
+#
+
+# Gathered before the block, not inside it: a block's `when` is evaluated before
+# any of its tasks run, so collecting the facts within the block it guards would
+# always see them undefined and skip.
+- name: Collect service facts
+  ansible.builtin.service_facts:
+  when: webserver_firewalld_manage
+
+# Skipped rather than failed when firewalld is not running, so a host that
+# manages its firewall somewhere else is left alone instead of having the deploy
+# stop on it.
+- name: Open the web ports in firewalld
+  when:
+    - webserver_firewalld_manage
+    - ansible_facts.services['firewalld.service'].state | default('') == 'running'
+  block:
+
+    # immediate as well as permanent: permanent alone writes the zone file but
+    # does not apply it until firewalld is reloaded, so the first deploy would
+    # finish with the port still closed and tests/verify.yml would fail on a
+    # host that is in fact configured correctly.
+    - name: Allow HTTP
+      ansible.posix.firewalld:
+        service: http
+        state: enabled
+        permanent: true
+        immediate: true
+
+    - name: Allow HTTPS
+      ansible.posix.firewalld:
+        service: https
+        state: enabled
+        permanent: true
+        immediate: true
+      when: webserver_tls_enabled

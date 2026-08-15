@@ -1,7 +1,8 @@
 ---
-# Mirrors roles/common/defaults. Role defaults do not carry across plays.
-webserver_user: www-data
-webserver_group: www-data
+# Mirrors roles/common/defaults. Role defaults do not carry across plays, so the
+# OS-derived identity has to be repeated rather than inherited.
+webserver_user: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
+webserver_group: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
 
 # Docroot the vhost points at. Must match roles/drupal drupal_base_path.
 drupal_base_path: /var/www/drupal
@@ -12,6 +13,30 @@ webserver_email: admin@example.com
 # Maximum upload size accepted by the web server. Keep this at or above the
 # php.ini upload_max_filesize so the two do not disagree.
 webserver_max_body_size: 64M
+
+# Where the vhost is written, and how nginx is made to load it. The two
+# distributions package nginx differently:
+#
+#   Debian  sites-available holds every vhost and a symlink into sites-enabled
+#           turns one on. The packaged default site is a file, so switching it
+#           off means deleting that symlink.
+#   RedHat  no sites-available at all; nginx.conf includes conf.d/*.conf
+#           directly, so writing the file is enabling it. The packaged default
+#           server lives inside nginx.conf itself and cannot be removed without
+#           editing a conffile -- it is left alone instead, because it declares
+#           no `default_server` and our vhost does, so nginx routes every
+#           unmatched Host header to Drupal and the packaged block is
+#           unreachable.
+webserver_vhost_path: >-
+  {{ '/etc/nginx/conf.d/drupal.conf' if ansible_os_family == 'RedHat'
+     else '/etc/nginx/sites-available/drupal' }}
+
+# Empty where the distribution has no enabled/available split.
+webserver_vhost_link: >-
+  {{ '' if ansible_os_family == 'RedHat' else '/etc/nginx/sites-enabled/drupal' }}
+
+webserver_default_site: >-
+  {{ '' if ansible_os_family == 'RedHat' else '/etc/nginx/sites-enabled/default' }}
 
 
 #
@@ -94,8 +119,102 @@ php_fpm_pool_settings:
   pm.max_spare_servers: 6
   pm.max_requests: 500
 
+# Pool keys that establish who PHP-FPM runs as and who may talk to its socket.
+# Kept separate from php_fpm_pool_settings above because that one is a tuning
+# knob an operator is meant to change, and this one is a property of the
+# distribution's packaging that they are not.
 #
-# AVIF support in GD -- OPT IN, DISABLED BY DEFAULT
+# Debian's packaged pool already runs as www-data and listens on a socket owned
+# by www-data, so there is nothing to correct.
+#
+# Red Hat's ships a pool that runs as `apache` -- a leftover of httpd being the
+# assumed front end -- listening on a socket the packaging then grants nginx
+# access to with a POSIX ACL. The socket is therefore reachable, but the worker
+# processes are still the wrong user: everything under the Drupal tree is owned
+# by the web server account, so an `apache` worker cannot write the files
+# directory and Drupal fails at its first cache write. Set every one of these
+# rather than only user/group, or the socket ACL keeps naming the old account.
+php_fpm_pool_identity: >-
+  {{ php_fpm_pool_identity_redhat if ansible_os_family == 'RedHat' else {} }}
+
+php_fpm_pool_identity_redhat:
+  user: "{{ webserver_user }}"
+  group: "{{ webserver_group }}"
+  listen.owner: "{{ webserver_user }}"
+  listen.group: "{{ webserver_group }}"
+  # listen.acl_users takes precedence over listen.owner/listen.group when it is
+  # set, and the packaged pool does set it -- to "apache,nginx". Leaving it
+  # alone would work today by accident; naming the account explicitly means the
+  # socket permissions follow webserver_user wherever it points.
+  listen.acl_users: "{{ webserver_user }}"
+
+# Red Hat only. PHP's runtime state directories are created root:apache 0770 by
+# php-common and php-fpm, matching the pool user the packaging assumes. Once the
+# pool runs as nginx instead, sessions and the file-backed OPcache are no longer
+# writable -- which surfaces as users being unable to stay logged in rather than
+# as anything that names a permission.
+php_runtime_dirs_redhat:
+  - /var/lib/php/opcache
+  - /var/lib/php/session
+  - /var/lib/php/wsdlcache
+  - /var/log/php-fpm
+
+# Red Hat only. AppStream's non-modular defaults are PHP 8.0 and nginx 1.20,
+# and Drupal 11 requires PHP 8.3, so the streams are not optional. Enabled
+# explicitly rather than relying on `dnf install php-cli` picking a default.
+web_dnf_module_streams:
+  - {name: php, stream: "8.3"}
+  - {name: nginx, stream: "1.26"}
+
+#
+# SELinux -- Red Hat only, no Debian counterpart
+#
+# The stock policy already labels /var/www(/.*)? as httpd_sys_content_t, so a
+# docroot under /var/www needs nothing: files Composer creates there inherit the
+# right type. What the policy cannot know is which directories Drupal writes to
+# at runtime, which is what these rules cover.
+webserver_selinux_manage: true
+
+# Type given to the directories Drupal writes to. Everything else in the tree
+# stays read-only to the web server, which is the point.
+webserver_selinux_rw_type: httpd_sys_rw_content_t
+
+# Composer's vendor/bin holds real executables -- drush among them -- and
+# systemd has to launch one of them for the cron timer. A file under /var/www
+# inherits httpd_sys_content_t, which is a content type and not an entrypoint,
+# so systemd refuses to exec it: the unit dies with status 203/EXEC and
+# "Permission denied" naming a file that is plainly mode 0755, because the
+# refusal is a label mismatch and not a permission bit.
+#
+# bin_t is what these files actually are, so this is a correction rather than a
+# loosening: it grants no write access to anything, and the web server could
+# already execute the tree as script content.
+webserver_selinux_bin_type: bin_t
+
+# PHP-FPM runs in httpd_t and reaches MariaDB through a local unix socket. The
+# targeted policy gates that behind this boolean, and denies it silently enough
+# that Drupal reports a generic "unable to connect" with nothing in the web
+# server log.
+webserver_selinux_booleans:
+  - httpd_can_network_connect_db
+
+#
+# firewalld -- Red Hat only
+#
+# Active by default on a stock RHEL install and blocking port 80, which Ubuntu
+# does not do. Skipped automatically when firewalld is not running, so a host
+# that manages its firewall elsewhere is left alone.
+webserver_firewalld_manage: true
+
+#
+# AVIF support in GD -- OPT IN, DISABLED BY DEFAULT, UBUNTU ONLY
+#
+# Not available on RHEL. The build below reconstructs the distribution's own
+# libgd from its source package with libavif linked in, and RHEL 9 ships no
+# libavif at all -- not in BaseOS, not in AppStream -- so there is nothing to
+# link against and no source package to rebuild from. Enabling this on a Red Hat
+# host fails immediately with that explanation rather than half-building
+# something; see roles/web/tasks/05_gd_avif.yml.
 #
 # Ubuntu ships libgd2 without libavif on purpose: libgd2 is in main, libavif's
 # Rust dependency tree keeps it in universe, and main cannot build-depend on
@@ -142,15 +261,20 @@ php_gd_avif_apt_suites:
   - "{{ ansible_distribution_release }}-updates"
   - "{{ ansible_distribution_release }}-security"
 
-# PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache.
-# php-uploadprogress ships in the universe component on both supported
+# PHP extensions Drupal 11 needs, plus apcu for the opcode/object cache. The
+# two distributions name almost none of them the same way, so the list is picked
+# by OS family rather than papered over with a translation table.
+php_packages: >-
+  {{ php_packages_redhat if ansible_os_family == 'RedHat' else php_packages_debian }}
+
+# php-uploadprogress ships in the universe component on both supported Ubuntu
 # releases, so no third-party PPA is required.
 #
 # NOTE: the bare `php` metapackage is deliberately NOT listed. It depends on
 # php8.3, whose first Depends alternative is libapache2-mod-php8.3, so apt would
 # install Apache as a side effect -- which then binds port 80 and stops nginx
 # from starting. php-cli gives the same interpreter without any web server.
-php_packages:
+php_packages_debian:
   - php-apcu
   - php-cli
   - php-curl
@@ -161,8 +285,37 @@ php_packages:
   - php-xml
   - php-zip
 
-# Installed only where apt actually offers them. php-opcache exists through PHP
-# 8.4 but not in Ubuntu 26.04's PHP 8.5, and naming a missing package aborts the
-# entire apt transaction rather than just skipping it.
-php_packages_optional:
+# Red Hat names differ in almost every case: the MySQL driver is php-mysqlnd,
+# APCu and zip are PECL builds, and there is no php-curl at all -- curl, json
+# and a dozen other extensions are compiled into php-common, which arrives as a
+# dependency of php-cli. php-process supplies posix, which Drush uses.
+php_packages_redhat:
+  - php-cli
+  - php-gd
+  - php-mbstring
+  - php-mysqlnd
+  - php-pdo
+  - php-pecl-apcu
+  - php-pecl-zip
+  - php-process
+  - php-xml
+
+# Installed only where the package manager actually offers them, because naming
+# a missing package aborts the entire transaction rather than skipping it. The
+# play reports whatever it had to leave out.
+#
+#   php-opcache             exists through PHP 8.4 but not in Ubuntu 26.04's
+#                           PHP 8.5, which builds OPcache into the interpreter.
+#   php-pecl-uploadprogress EPEL only; absent from RHEL AppStream. Drupal 11
+#                           does not require it, so RHEL simply goes without and
+#                           the run says so.
+php_packages_optional: >-
+  {{ php_packages_optional_redhat if ansible_os_family == 'RedHat'
+     else php_packages_optional_debian }}
+
+php_packages_optional_debian:
   - php-opcache
+
+php_packages_optional_redhat:
+  - php-opcache
+  - php-pecl-uploadprogress

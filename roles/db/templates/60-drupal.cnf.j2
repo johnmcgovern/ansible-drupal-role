@@ -10,9 +10,9 @@
 transaction-isolation = {{ db_transaction_isolation }}
 
 # READ-COMMITTED requires row-based binary logging. Binary logging is off by
-# default on Ubuntu, but setting this now means enabling it later (for
-# replication or point-in-time recovery) cannot fail with an incompatible
-# format error.
+# default on both supported platforms, but setting this now means enabling it
+# later (for replication or point-in-time recovery) cannot fail with an
+# incompatible format error.
 binlog_format = {{ db_binlog_format }}
 
 character-set-server = utf8mb4

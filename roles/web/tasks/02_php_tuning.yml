@@ -1,26 +1,30 @@
 ---
 
-# A drop-in in conf.d rather than edits to the packaged php.ini: files there are
-# loaded in name order after php.ini, so 99- wins, and a PHP package upgrade
-# can never produce a conffile prompt or silently revert these settings.
+# A drop-in rather than edits to the packaged php.ini: files in the scan
+# directory are loaded in name order after php.ini, so 99- wins, and a PHP
+# package upgrade can never produce a conffile prompt or silently revert these
+# settings.
+#
+# php_conf_dirs is one directory on Red Hat and two on Debian -- see the
+# derivation in 01_webserver_php_install.yml -- so this loop writes the same
+# file everywhere PHP will look for it.
 - name: Write the PHP drop-in configuration
   ansible.builtin.template:
     src: php-drupal.ini.j2
-    dest: "/etc/php/{{ php_version }}/{{ item }}/conf.d/99-drupal.ini"
+    dest: "{{ item }}/99-drupal.ini"
     owner: root
     group: root
     mode: "0644"
-  loop:
-    - cli
-    - fpm
+  loop: "{{ php_conf_dirs }}"
   notify: Restart php-fpm
 
 # Process manager settings live in the pool file, not php.ini, so they cannot
 # go in the drop-in above. Editing the individual keys leaves the rest of the
-# packaged pool definition intact.
+# packaged pool definition intact. php_fpm_pool_identity is empty on Debian and
+# repoints Red Hat's apache-owned pool at the web server account.
 - name: Tune the PHP-FPM process manager
   community.general.ini_file:
-    path: "/etc/php/{{ php_version }}/fpm/pool.d/www.conf"
+    path: "{{ php_fpm_pool_file }}"
     section: www
     option: "{{ item.key }}"
     value: "{{ item.value }}"
@@ -28,10 +32,10 @@
     group: root
     mode: "0644"
     no_extra_spaces: true
-  loop: "{{ php_fpm_pool_settings | dict2items }}"
+  loop: "{{ (php_fpm_pool_settings | combine(php_fpm_pool_identity)) | dict2items }}"
   notify: Restart php-fpm
 
 - name: Validate the PHP-FPM configuration
   ansible.builtin.command:
-    cmd: "php-fpm{{ php_version }} --test"
+    cmd: "{{ php_fpm_binary }} --test"
   changed_when: false

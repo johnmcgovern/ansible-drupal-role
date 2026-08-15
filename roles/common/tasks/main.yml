@@ -1,30 +1,45 @@
 ---
 
+# One identifier for the running platform, so the supported and tested lists
+# stay flat and readable rather than becoming a nested structure that has to be
+# searched. Ubuntu contributes its codename, Red Hat its name and major version.
+- name: Identify the running platform
+  ansible.builtin.set_fact:
+    common_platform: >-
+      {{ ansible_distribution_release if ansible_os_family == 'Debian'
+         else (ansible_distribution | lower | replace(' ', '')
+               ~ ansible_distribution_major_version) }}
+
 - name: Assert the target is a supported OS
   ansible.builtin.assert:
     that:
-      - ansible_distribution == 'Ubuntu'
-      - ansible_distribution_release in common_supported_releases
+      - ansible_os_family in ['Debian', 'RedHat']
+      - common_platform in common_supported_releases
     fail_msg: >-
-      This role supports Ubuntu {{ common_supported_releases | join(', ') }} only.
+      These roles support {{ common_supported_releases | join(', ') }} only.
       Detected {{ ansible_distribution }} {{ ansible_distribution_version }}
-      ({{ ansible_distribution_release }}).
+      (identified as "{{ common_platform }}").
     success_msg: >-
       {{ ansible_distribution }} {{ ansible_distribution_version }}
-      ({{ ansible_distribution_release }}) detected.
+      (identified as "{{ common_platform }}") detected.
 
-# 26.04 moves to PHP 8.5 and MariaDB 11.8. Nothing here pins either version --
-# the PHP version is discovered at runtime -- but Drupal 11 only recommends up
-# to PHP 8.4, so this is worth stating plainly rather than letting a deploy
-# imply the combination is supported.
-- name: Warn when running on a release that is supported but not yet proven
+# Ubuntu 26.04 moves to PHP 8.5 and MariaDB 11.8; RHEL 9 has no CI runner at
+# all. Nothing here pins a version -- the PHP version is discovered at runtime --
+# but both facts are worth stating plainly rather than letting a deploy imply a
+# guarantee that is not there.
+- name: Warn when running on a platform that is supported but not proven by CI
   ansible.builtin.debug:
     msg: >-
-      {{ ansible_distribution_release }} is EXPERIMENTAL for these roles.
-      Ubuntu 24.04 (noble) is the tested target. Drupal 11 recommends PHP 8.4;
-      {{ ansible_distribution_release }} ships PHP 8.5, which Drupal core
-      supports from 11.3 but which contributed modules may not.
-  when: ansible_distribution_release not in common_tested_releases
+      {{ common_platform }} is EXPERIMENTAL for these roles: it has no blocking
+      CI leg, so it is validated by hand rather than on every push.
+      {{ 'Drupal 11 recommends PHP 8.4; ' ~ ansible_distribution_release
+         ~ ' ships PHP 8.5, which Drupal core supports from 11.3 but which
+         contributed modules may not.'
+         if ansible_os_family == 'Debian'
+         else 'PHP, MariaDB and nginx all come from AppStream module streams
+         that roles/web and roles/db enable explicitly, because the non-modular
+         defaults (PHP 8.0, MariaDB 10.5) are too old for Drupal 11.' }}
+  when: common_platform not in common_tested_releases
 
 # Refreshing the package index is not a change to system state, so it is not
 # reported as one. Otherwise every run made more than cache_valid_time after the
@@ -34,15 +49,27 @@
     update_cache: true
     cache_valid_time: 3600
   changed_when: false
+  when: ansible_os_family == 'Debian'
 
 - name: Install common packages
   ansible.builtin.apt:
     name: "{{ common_packages }}"
     state: present
+  when: ansible_os_family == 'Debian'
 
-# The nginx package creates www-data itself. We only assert it is
-# present rather than creating it, because rewriting an existing system user's
-# home directory or shell is invasive and is not needed by anything here.
+# dnf refreshes metadata on its own schedule, so there is no separate cache task
+# to keep out of the change count.
+- name: Install common packages
+  ansible.builtin.dnf:
+    name: "{{ common_packages + common_packages_redhat }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+# The nginx package creates its own run-as account -- www-data on Debian, nginx
+# on Red Hat -- but roles/common runs before roles/web installs it. We only
+# assert the account is present rather than creating it where it already exists,
+# because rewriting an existing system user's home directory or shell is
+# invasive and is not needed by anything here.
 - name: Look up the web server account
   ansible.builtin.getent:
     database: passwd

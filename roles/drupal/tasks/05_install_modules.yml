@@ -19,7 +19,7 @@
 # tree owned by www-data.
 - name: Install Drupal modules with Composer
   ansible.builtin.command:
-    cmd: "composer require drupal/{{ item }} --no-interaction"
+    cmd: "{{ composer_bin }} require drupal/{{ item }} --no-interaction"
     chdir: "{{ drupal_base_path }}"
   environment: "{{ drupal_composer_env }}"
   loop: "{{ drupal_install_modules }}"

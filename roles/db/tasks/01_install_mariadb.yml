@@ -1,5 +1,33 @@
 ---
 
+#
+# AppStream module stream -- Red Hat only
+#
+# RHEL 9's non-modular mariadb-server is 10.5, and Drupal 11 requires 10.6 or
+# newer, so enabling the 10.11 stream is not optional. Same mechanism as
+# roles/web uses for php and nginx; kept here rather than shared because the db
+# role has to work when it runs against a host the web role never touches.
+- name: Enable the required DNF module streams
+  when: ansible_os_family == 'RedHat'
+  block:
+
+    - name: Read the currently enabled DNF module streams
+      ansible.builtin.command:
+        cmd: dnf --quiet module list --enabled
+      register: db_dnf_enabled
+      changed_when: false
+
+    - name: Enable the module stream  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: "dnf --assumeyes module enable {{ item.name }}:{{ item.stream }}"
+      loop: "{{ db_dnf_module_streams }}"
+      loop_control:
+        label: "{{ item.name }}:{{ item.stream }}"
+      when: >-
+        db_dnf_enabled.stdout is not search('(?m)^' ~ item.name ~ '\s+'
+                                            ~ (item.stream | regex_escape) ~ '\s')
+      changed_when: true
+
 # install_recommends is off deliberately. mariadb-client Recommends
 # libdbd-mysql-perl, which Depends on libmysqlclient21 -- Oracle MySQL 8.0's
 # client library -- pulling a MySQL component onto a MariaDB-only host. Those
@@ -8,27 +36,46 @@
 # but it is only the shared /etc/mysql/my.cnf shim, not a MySQL server or client.
 - name: Install MariaDB server and client
   ansible.builtin.apt:
-    name:
-      - mariadb-server
-      - mariadb-client
+    name: "{{ db_packages }}"
     state: present
     install_recommends: false
+  when: ansible_os_family == 'Debian'
+
+# dnf has no install_recommends equivalent to switch off, and Red Hat's
+# mariadb-server has no weak dependency on an Oracle client library to avoid.
+# It does pull in mysql-selinux, which is the SELinux policy module for the
+# MariaDB server itself rather than any part of MySQL -- tests/verify.yml
+# allowlists it for that reason.
+- name: Install MariaDB server and client
+  ansible.builtin.dnf:
+    name: "{{ db_packages }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
 
 # Ubuntu 24.04 marks the system Python as externally managed (PEP 668), so
-# `pip install PyMySQL` is refused. The distro package is the supported route.
-# PyMySQL is pure Python, so no -dev headers or compiler are needed either.
+# `pip install PyMySQL` is refused, and RHEL 9's system Python is 3.9 with no
+# pip module installed by default. The distro package is the supported route on
+# both. PyMySQL is pure Python, so no -dev headers or compiler are needed.
 - name: Install the Python MySQL client library
   ansible.builtin.apt:
-    name: python3-pymysql
+    name: "{{ db_python_mysql_package }}"
     state: present
+  when: ansible_os_family == 'Debian'
 
-# A drop-in in mariadb.conf.d rather than edits to 50-server.cnf, so a package
+- name: Install the Python MySQL client library
+  ansible.builtin.dnf:
+    name: "{{ db_python_mysql_package }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+# A drop-in rather than edits to the packaged server config, so a package
 # upgrade cannot revert it or raise a conffile prompt. Files load in name order,
-# so 60- takes precedence over the packaged 50-.
+# so 60- takes precedence over the packaged 50-server.cnf on Debian and
+# mariadb-server.cnf on Red Hat.
 - name: Write the Drupal MariaDB configuration
   ansible.builtin.template:
     src: 60-drupal.cnf.j2
-    dest: /etc/mysql/mariadb.conf.d/60-drupal.cnf
+    dest: "{{ db_conf_dir }}/60-drupal.cnf"
     owner: root
     group: root
     mode: "0644"
@@ -65,10 +112,48 @@
 - name: Apply the pending MariaDB restart
   ansible.builtin.meta: flush_handlers
 
-# MariaDB on Ubuntu authenticates root through the unix_socket plugin: only a
-# process already running as system root can connect as DB root. That is
-# strictly stronger than a password in a vars file, so it is left in place and
-# every admin task below connects over the socket instead.
+# Every administrative task below connects as root over the local socket with no
+# password, which only works because MariaDB authenticates root through the
+# unix_socket plugin: a process already running as system root is trusted, and
+# nothing else can connect as root at all. That is strictly stronger than
+# keeping a root password in a vars file, and it is why there is no
+# db_root_password anywhere in this repo.
+#
+# It is also a packaging decision, not something the roles configure, so it is
+# checked rather than assumed -- the alternative to knowing is discovering later
+# that a distribution set a blank root password instead.
+#
+# MariaDB 10.4+ stores credentials in mysql.global_priv as JSON and can hold
+# several alternatives per account. Red Hat's root@localhost lists
+# mysql_native_password with the literal string "invalid" as its hash -- a value
+# no password can ever produce -- alongside unix_socket. Reading the `plugin`
+# column of the mysql.user compatibility view shows only the first of those and
+# is therefore misleading; searching the JSON is what actually answers the
+# question.
+- name: Check how the MariaDB root account authenticates
+  ansible.builtin.command:
+    cmd: >-
+      mariadb --skip-column-names --batch --execute
+      "SELECT IF(JSON_SEARCH(priv, 'one', 'unix_socket') IS NOT NULL, 'yes', 'no')
+       FROM mysql.global_priv WHERE user = 'root' AND host = 'localhost';"
+  register: db_root_socket_auth
+  changed_when: false
+
+- name: Assert the MariaDB root account authenticates over the unix socket
+  ansible.builtin.assert:
+    that:
+      - "'yes' in db_root_socket_auth.stdout"
+    fail_msg: >-
+      MariaDB's root@localhost does not authenticate through the unix_socket
+      plugin on this host. Every administrative task in these roles connects
+      over the socket as system root with no password, and there is deliberately
+      no db_root_password to fall back to. Investigate before going further:
+      quietly introducing a stored root password would remove the property this
+      design depends on.
+    success_msg: "MariaDB root authenticates over the unix socket; no root password is stored."
+
+# Both are no-ops on Red Hat, whose MariaDB packaging creates neither, and on a
+# re-run of an already converged Debian host.
 - name: Remove the anonymous MariaDB accounts
   ansible.mysql.mysql_user:
     login_unix_socket: "{{ db_login_unix_socket }}"

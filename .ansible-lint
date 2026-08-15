@@ -4,6 +4,7 @@ profile: production
 exclude_paths:
   - .git/
   - .github/
+  - .ansible/
 
 skip_list:
   # These roles share a single user-facing configuration surface documented in

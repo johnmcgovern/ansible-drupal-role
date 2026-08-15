@@ -1,6 +1,24 @@
 ---
 # Opt-in, off by default. See the README for why this is not the recommended
 # path and what it costs to run.
+#
+# Debian only. The build works by rebuilding the distribution's own libgd from
+# its source package with libavif linked in; RHEL 9 ships no libavif in BaseOS
+# or AppStream, so there is nothing to link against, and `apt-get source` has no
+# dnf equivalent that would give back the distribution's patched sources.
+# Failing loudly beats emitting a half-built extension PHP then refuses to load.
+
+- name: Fail clearly when the AVIF GD build is requested on an unsupported platform
+  ansible.builtin.fail:
+    msg: >-
+      php_gd_avif_build is true, but the build is implemented for Debian-family
+      hosts only: it rebuilds the distribution's libgd source package against
+      libavif, and RHEL 9 ships neither. Use php-imagick with Drupal's
+      ImageMagick toolkit if you need AVIF derivatives, or set
+      php_gd_avif_build: false and accept the GD warning on the status report.
+  when:
+    - php_gd_avif_build
+    - ansible_os_family != 'Debian'
 
 #
 # Revert path -- runs when the flag is off, so disabling it is a real undo
@@ -11,7 +29,9 @@
   ansible.builtin.stat:
     path: "/etc/php/{{ php_version }}/fpm/conf.d/20-gd.ini"
   register: gd_ini_state
-  when: not php_gd_avif_build
+  when:
+    - not php_gd_avif_build
+    - ansible_os_family == 'Debian'
 
 # The distribution ships this as a symlink into mods-available. The build path
 # below replaces it with a regular file, so a regular file here means a custom
@@ -27,6 +47,7 @@
     - fpm
   when:
     - not php_gd_avif_build
+    - ansible_os_family == 'Debian'
     - gd_ini_state.stat.exists | default(false)
     - not (gd_ini_state.stat.islnk | default(true))
   notify: Restart php-fpm
@@ -37,7 +58,9 @@
 #
 
 - name: Build an AVIF-capable GD extension
-  when: php_gd_avif_build
+  when:
+    - php_gd_avif_build
+    - ansible_os_family == 'Debian'
   block:
 
     - name: Warn that the AVIF GD build is unsupported

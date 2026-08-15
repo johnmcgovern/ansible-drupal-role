@@ -10,15 +10,24 @@ drupal_base_path: /var/www/drupal
 drupal_version: ""
 
 # Mirrors roles/common/defaults. Role defaults do not carry across plays, and
-# the drupal role runs in its own play.
-webserver_user: www-data
-webserver_group: www-data
+# the drupal role runs in its own play, so the OS-derived identity is repeated
+# rather than inherited.
+webserver_user: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
+webserver_group: "{{ 'nginx' if ansible_os_family == 'RedHat' else 'www-data' }}"
 
 drupal_sitename: Drupal Site
 drupal_email: admin@example.com
 drupal_region: en
 
 drupal_admin: admin
+
+# Address on the uid 1 account. Separate from drupal_email, which is the site's
+# own "from" address, but defaulting to it because on a single-admin site they
+# are usually the same. Without this, site:install falls back to Drush's own
+# built-in default of admin@example.com and the account silently ends up with an
+# address nobody owns -- which matters, because that is where a password reset
+# link goes.
+drupal_admin_email: "{{ drupal_email }}"
 
 # Drupal resolves config_sync_directory relative to the docroot ({{ drupal_base_path }}/web),
 # so '../config/sync' lands at {{ drupal_base_path }}/config/sync -- outside the
@@ -36,13 +45,36 @@ drupal_drush: "{{ drupal_base_path }}/vendor/bin/drush"
 # Drush bootstraps Drupal, which writes the twig cache under
 # sites/default/files. Running it as root leaves root-owned files there that the
 # web server cannot rewrite, so every drush invocation runs as the web server
-# account instead. www-data's home is not writable, hence the explicit HOME.
+# account instead. That account's home is not writable, hence the explicit HOME.
 drupal_drush_env:
   HOME: /tmp
 
-# Database host as seen from the web server. Kept as a variable so the web and
-# db tiers can be split across hosts; settings.php no longer hardcodes localhost.
+# Red Hat only. SELinux is enforcing, and the directories Drupal writes to need
+# httpd_sys_rw_content_t rather than the httpd_sys_content_t the rest of the
+# tree inherits from /var/www. roles/web registers the file context rules;
+# relabelling happens here because it cannot run until the directories exist.
+drupal_selinux_relabel: true
+
+# Database connection as seen from the web server. Kept as variables so the web
+# and db tiers can be split across hosts; settings.php no longer hardcodes
+# localhost.
+#
+# These four mirror roles/db/defaults deliberately, and the duplication is not
+# an oversight. Role defaults do not carry across plays, and site.yml runs the
+# db and drupal roles in two separate plays -- so without a copy here,
+# settings.php.j2 renders with db_name undefined on any host whose group_vars
+# does not happen to set it, and the failure surfaces inside a no_log task as an
+# error with no variable name in it. tests/check-vars-drift.py enforces that
+# every role defaults everything it uses, which is what keeps these in step.
 db_host: localhost
+db_name: drupal
+db_user: drupal_user
+db_port: 3306
+db_service: mariadb
+
+# Used in the systemd unit descriptions. Mirrors roles/web/defaults for the same
+# cross-play reason as the database settings above.
+webserver_sitename: drupal.example.com
 
 # Host header protection. Empty means disabled -- a misconfigured pattern makes
 # the site unreachable, so it is opt-in. Supply a list of regular expressions.
@@ -128,6 +160,14 @@ drupal_enable_modules: []
 # Pinned upstream installer checksum source. The installer is verified against
 # the SHA-384 that Composer publishes before it is executed.
 composer_installer_sig_url: https://composer.github.io/installer.sig
+
+# Composer is invoked by absolute path rather than by name. Red Hat's sudoers
+# sets secure_path to /sbin:/bin:/usr/sbin:/usr/bin, which excludes
+# /usr/local/bin, so a bare `composer` is not found under become even though it
+# is on an interactive PATH -- Ubuntu's secure_path happens to include it, which
+# is the only reason the bare name ever worked.
+composer_bin_dir: /usr/local/bin
+composer_bin: "{{ composer_bin_dir }}/composer"
 
 # Composer runs as root here (it writes into /var/www). Without COMPOSER_HOME it
 # guesses at a cache location, and without ALLOW_SUPERUSER it emits an

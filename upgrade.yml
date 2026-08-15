@@ -27,8 +27,18 @@
   vars:
     upgrade_base_path: "{{ drupal_base_path | default('/var/www/drupal') }}"
     upgrade_drush: "{{ upgrade_base_path }}/vendor/bin/drush"
-    upgrade_web_user: "{{ webserver_user | default('www-data') }}"
-    upgrade_web_group: "{{ webserver_group | default('www-data') }}"
+    # Absolute path: Red Hat's sudoers secure_path excludes /usr/local/bin, so
+    # a bare `composer` is not found under become. See roles/drupal/defaults.
+    upgrade_composer: "{{ composer_bin | default('/usr/local/bin/composer') }}"
+    # Same OS-derived fallback the roles use: Debian's nginx runs as www-data,
+    # Red Hat's as nginx. A bare 'www-data' default here means every drush call
+    # below runs as a user that does not exist on a Red Hat host.
+    upgrade_web_user: >-
+      {{ webserver_user
+         | default('nginx' if ansible_os_family == 'RedHat' else 'www-data') }}
+    upgrade_web_group: >-
+      {{ webserver_group
+         | default('nginx' if ansible_os_family == 'RedHat' else 'www-data') }}
     upgrade_config_sync: "{{ drupal_config_sync_path | default(upgrade_base_path ~ '/config/sync') }}"
     upgrade_composer_env:
       COMPOSER_HOME: /root/.composer
@@ -120,7 +130,9 @@
 
         - name: Update Drupal core within its current constraints
           ansible.builtin.command:
-            cmd: composer update "drupal/core-*" --with-all-dependencies --no-interaction
+            cmd: >-
+              {{ upgrade_composer }} update "drupal/core-*"
+              --with-all-dependencies --no-interaction
             chdir: "{{ upgrade_base_path }}"
           environment: "{{ upgrade_composer_env }}"
           when: not upgrade_target
@@ -132,7 +144,7 @@
         - name: Move Drupal core to a new constraint
           ansible.builtin.command:
             cmd: >-
-              composer require
+              {{ upgrade_composer }} require
               drupal/core-recommended:{{ upgrade_target }}
               drupal/core-composer-scaffold:{{ upgrade_target }}
               drupal/core-project-message:{{ upgrade_target }}

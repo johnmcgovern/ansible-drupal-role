@@ -18,3 +18,10 @@
 # no longer maintains.
 - name: Configure the GD extension
   ansible.builtin.import_tasks: 05_gd_avif.yml
+
+# SELinux is enforcing and firewalld is running on a stock RHEL install; Ubuntu
+# has neither an nginx AppArmor profile nor any firewall rules, so there is
+# nothing for this to do there.
+- name: Configure SELinux and the firewall
+  ansible.builtin.import_tasks: 06_selinux_firewall.yml
+  when: ansible_os_family == 'RedHat'

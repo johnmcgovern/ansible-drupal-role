@@ -6,7 +6,7 @@
 - name: Write Nginx conf file
   ansible.builtin.template:
     src: nginx-drupal.j2
-    dest: /etc/nginx/sites-available/drupal
+    dest: "{{ webserver_vhost_path }}"
     owner: root
     group: root
     mode: "0644"

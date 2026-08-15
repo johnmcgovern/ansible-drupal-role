@@ -111,5 +111,10 @@ group_vars/all
 hosts
 site.retry
 
+# Collections cache. ansible-lint installs requirements.yml into the project
+# directory when it cannot find them elsewhere, which drops ~28 MB of vendored
+# collections here. It is a tool cache, not source.
+.ansible/
+
 # Session handoff notes: internal hostnames, not project documentation
 HANDOFF.md
