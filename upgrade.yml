@@ -291,6 +291,59 @@
                 path: "{{ upgrade_template_dir }}"
                 state: absent
 
+        # A project scaffolded from a stable release carries
+        # "minimum-stability": "stable", and Composer applies that to the whole
+        # dependency graph -- so requiring a dev branch fails with
+        #
+        #   drupal/core 12.x-dev ... does not match your minimum-stability
+        #
+        # no matter what --stability the original create-project used. Opting in
+        # to an unstable target therefore has to relax the project itself, not
+        # just the command line.
+        #
+        # prefer-stable alongside it is what keeps this from being reckless:
+        # Composer still takes the stable release of everything that has one,
+        # and only falls back to a dev version where no stable release exists --
+        # which, for this upgrade, is Drupal core alone.
+        - name: Allow non-stable packages in the project
+          when:
+            - upgrade_allow_unstable | bool
+            - upgrade_target is search(upgrade_unstable_pattern)
+          block:
+
+            - name: Read the project's current stability settings
+              ansible.builtin.slurp:
+                src: "{{ upgrade_base_path }}/composer.json"
+              register: upgrade_stability_manifest
+
+            # Remembered so the always: block below can put them back. Relaxing
+            # stability and then failing the upgrade would leave the project
+            # permanently willing to install dev versions of anything -- a
+            # change the operator never asked for, on a site still running the
+            # release it started on.
+            - name: Remember the stability settings so a failure can restore them
+              ansible.builtin.set_fact:
+                upgrade_stability_before: >-
+                  {{ {'minimum-stability':
+                        (upgrade_stability_manifest.content | b64decode | from_json)['minimum-stability']
+                        | default('stable'),
+                      'prefer-stable':
+                        (upgrade_stability_manifest.content | b64decode | from_json)['prefer-stable']
+                        | default(false) | string | lower} }}
+
+            - name: Relax minimum-stability and keep preferring stable releases
+              ansible.builtin.command:
+                cmd: "{{ upgrade_composer }} config {{ item.key }} {{ item.value }}"
+                chdir: "{{ upgrade_base_path }}"
+              environment: "{{ upgrade_composer_env }}"
+              loop:
+                - {key: minimum-stability, value: dev}
+                - {key: prefer-stable, value: "true"}
+              loop_control:
+                label: "{{ item.key }}={{ item.value }}"
+              when: upgrade_stability_before[item.key] != item.value
+              changed_when: true
+
         # Moving to a new minor or major means rewriting the core requirements,
         # not just updating within them. These three packages are what
         # drupal/recommended-project pins, and they must move together.
@@ -306,6 +359,10 @@
           environment: "{{ upgrade_composer_env }}"
           when: upgrade_target | length > 0
           changed_when: true
+
+        - name: Record that core actually moved
+          ansible.builtin.set_fact:
+            upgrade_core_moved: true
 
         # Composer wrote as root. Hand the tree back before Drupal runs, or the
         # web server cannot write its caches afterwards.
@@ -348,6 +405,26 @@
           changed_when: true
 
       always:
+        # Composer reverts composer.json and composer.lock itself when a require
+        # fails, but it knows nothing about the stability keys set above -- those
+        # were written by a separate `composer config` call that succeeded. Put
+        # them back, or a failed upgrade silently leaves the project accepting
+        # dev releases of every dependency it has.
+        - name: Restore the stability settings if the upgrade did not complete
+          ansible.builtin.command:
+            cmd: "{{ upgrade_composer }} config {{ item.key }} {{ item.value }}"
+            chdir: "{{ upgrade_base_path }}"
+          environment: "{{ upgrade_composer_env }}"
+          loop:
+            - {key: minimum-stability, value: "{{ upgrade_stability_before['minimum-stability'] | default('stable') }}"}
+            - {key: prefer-stable, value: "{{ upgrade_stability_before['prefer-stable'] | default('true') }}"}
+          loop_control:
+            label: "{{ item.key }}={{ item.value }}"
+          when:
+            - upgrade_stability_before is defined
+            - not (upgrade_core_moved | default(false))
+          changed_when: true
+
         - name: Take the site out of maintenance mode
           ansible.builtin.command:
             cmd: "{{ upgrade_drush }} state:set system.maintenance_mode 0 --input-format=integer"
