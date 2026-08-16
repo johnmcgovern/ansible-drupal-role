@@ -5,6 +5,17 @@
 # across two machines. If you split them, set db_host in group_vars/all to the
 # database server's address and grant the Drupal DB user access from the web
 # server's address rather than localhost.
+#
+# More than one host is fine. Deploy them one at a time with --limit:
+#
+#     ansible-playbook -i hosts site.yml --limit host1
+#
+# Anything that is a property of a particular host -- its hostname, whether it
+# terminates TLS, which Drupal release it is pinned to -- belongs in
+# host_vars/<host>.yml, not group_vars/all. host_vars outranks group_vars, so
+# the shared configuration stays shared and each host states only its own
+# differences. Putting a hostname in group_vars/all leaves that file describing
+# one machine and quietly wrong for every other.
 
 all:
   children:

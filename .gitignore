@@ -108,6 +108,7 @@ venv.bak/
 
 # Project specific
 group_vars/all
+host_vars/
 hosts
 site.retry
 

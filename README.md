@@ -70,7 +70,7 @@ of which fail with an explanation rather than deploying something untested.
 | PHP-FPM pool tuning | Yes | Yes | Yes |
 | systemd cron timer | Yes | Yes | Yes |
 | systemd backup timer, and restore script | Yes | Yes | Yes |
-| argon2id password hashing | Yes | Yes | Yes |
+| argon2id password hashing *(Drupal 11.4+)* | Yes | Yes | Yes |
 | Trusted host patterns | Yes | Yes | Yes |
 | **TLS via Let's Encrypt** | Yes | Yes | **No** — no certbot outside EPEL |
 | **AVIF GD build** (`php_gd_avif_build`) | Yes | Yes | **No** — no libavif to build against |
@@ -255,6 +255,14 @@ cp hosts.sample hosts && cp group_vars/all.sample group_vars/all
 3. Edit `hosts` to point at your server, and `group_vars/all` for your environment.
    Both files are gitignored.
 
+Deploying more than one host? Put the shared configuration in `group_vars/all` and give
+each host a `host_vars/<host>.yml` for what is genuinely its own — hostname, whether it
+terminates TLS, which release it is pinned to — then run them one at a time with
+`--limit`. `host_vars` outranks `group_vars`, so the shared file stays shared. A hostname
+in `group_vars/all` makes that file a description of one machine and wrong for every
+other, which is exactly the mistake worth avoiding. `host_vars/` is gitignored alongside
+`hosts` and `group_vars/all`.
+
 `group_vars/all.clean` is the same 40 settings with the explanations stripped down to
 one-line section headings — 82 lines against the sample's 234. Copy that one instead if
 you would rather read the configuration than the reasoning; the sample remains the
@@ -417,6 +425,17 @@ target release's own template and permits whatever it declares that the project 
 naming each one in the output; set `upgrade_sync_allow_plugins: false` to manage it by
 hand.
 
+Expect one manual step after a cross-minor upgrade. A newer release can deprecate a core
+module that the older one enabled, and upgrading leaves it installed where a fresh install
+of the newer release would not have it — moving 11.3 to 11.4 leaves `history` behind, for
+instance. `tests/verify.yml` fails on it deliberately and names the module, because unlike
+the GD/AVIF and update-fetch warnings this is something you can act on. Uninstalling it
+drops data (`history` tracks per-user node read state), so it is not done automatically:
+
+```bash
+drush pm:uninstall history
+```
+
 The pre-upgrade backup is the rollback plan: Composer can be reverted from
 `composer.lock`, but a failed `updatedb` cannot be undone without the database.
 `drupal-restore.sh` restores exactly what it produces. Set `upgrade_backup: false` only
@@ -425,6 +444,20 @@ if you have just taken one by hand.
 The playbook reports the version before and after, and asserts the site still bootstraps
 afterwards. Re-running it when there is nothing to do reports
 `11.4.5 -> 11.4.5 (no change: already at the newest release allowed by composer.json)`.
+
+
+### The administrator account
+
+`drupal_admin` and `drupal_admin_password` are applied by `site:install`, which runs only
+when Drupal is not already installed. **Neither is reconciled on later runs** — changing
+them in `group_vars/all` and re-deploying does nothing, by design, so a routine deploy
+cannot reset a live site's administrator password. Change it with
+`drush user:password <name> '<password>'` instead.
+
+`drupal_admin_email` sets the address on the uid 1 account, defaulting to `drupal_email`.
+Without it `site:install` falls back to Drush's own built-in `admin@example.com`, and
+since that is where a password reset link goes, it is worth setting. Like the password, it
+applies at install time only.
 
 
 ### Testing against an unreleased Drupal
@@ -657,6 +690,31 @@ drupal_password_options: {}           # PHP defaults: 64 MiB, 4 iterations, 1 th
 
 `PASSWORD_ARGON2ID` is available in Ubuntu 24.04's PHP 8.3, so this needs no third-party
 packages.
+
+**It requires Drupal 11.4 or newer.** Before 11.4 core declares the password service with
+no arguments —
+
+```yaml
+password:
+  class: Drupal\Core\Password\PhpPassword
+```
+
+— so it takes PHP's `PASSWORD_DEFAULT` and the `password.algorithm` parameter written into
+`services.yml` is read by nobody. Setting `drupal_password_algorithm` on an older release
+is not an error, it is simply inert, and the site keeps hashing with bcrypt. Nothing in
+Drupal says so.
+
+`tests/verify.yml` therefore checks the algorithm actually in use only where core can
+honour it, and reports the skip rather than passing quietly:
+
+```
+Drupal 11.3.16 does not consume the password.algorithm container parameter -- it
+gained that in 11.4 -- so drupal_password_algorithm (argon2id) has no effect here
+and the site hashes with PHP's default.
+```
+
+Upgrading such a site to 11.4 switches it on with no configuration change: the parameter
+was already in `services.yml` waiting to be read.
 
 **Existing users are not locked out.** `password_verify()` reads the algorithm from the
 hash itself, so bcrypt hashes keep validating; Drupal marks them as needing a rehash and
