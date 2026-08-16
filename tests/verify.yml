@@ -104,6 +104,17 @@
 
   tasks:
 
+    # Namespaced so it cannot outrank group_vars. Keeps the "which release
+    # honours password.algorithm" fact in one place -- roles/drupal/defaults --
+    # rather than restating it here where it would drift.
+    - name: Read the drupal role's defaults for shared constants
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/drupal/defaults/main.yml"
+        name: verify_role_defaults
+      delegate_to: localhost
+      become: false
+      run_once: true
+
     # Every TLS and AVIF assertion in this playbook is conditional on a
     # variable that comes from group_vars. If group_vars is not loaded -- which
     # happens silently whenever this playbook is run with an inventory that
@@ -443,6 +454,44 @@
     # silently falls back to the PHP default when password.algorithm is not a
     # value from password_algos(), so asserting on configuration alone would
     # pass while the site kept using bcrypt.
+    - name: Read the running Drupal version
+      ansible.builtin.command:
+        cmd: "{{ verify_drush }} status --field=drupal-version"
+        chdir: "{{ verify_base_path }}"
+      become: true
+      become_user: "{{ verify_webserver_user }}"
+      environment:
+        HOME: /tmp
+      register: verify_core_version
+      changed_when: false
+
+    # password.algorithm is only wired into the container from the release named
+    # in the role defaults. Before that, core declares the password service with
+    # no arguments, so it takes PHP's PASSWORD_DEFAULT and the parameter written
+    # into services.yml is read by nobody -- the site hashes with bcrypt and
+    # nothing says so. Asserting argon2id on such a release would be demanding
+    # something core cannot do, so the check is gated and the skip is reported
+    # rather than passing silently.
+    - name: Decide whether this core honours the configured hashing algorithm
+      ansible.builtin.set_fact:
+        verify_password_algorithm_supported: >-
+          {{ (verify_core_version.stdout | trim)
+             is version(verify_role_defaults.drupal_password_algorithm_min_core, '>=') }}
+
+    - name: Report that this release cannot honour the configured algorithm
+      ansible.builtin.debug:
+        msg: >-
+          Drupal {{ verify_core_version.stdout | trim }} does not consume the
+          password.algorithm container parameter -- it gained that in
+          {{ verify_role_defaults.drupal_password_algorithm_min_core }} -- so
+          drupal_password_algorithm ({{ verify_password_algorithm }}) has no
+          effect here and the site hashes with PHP's default. Not a fault, but
+          the setting is inert until this site is on
+          {{ verify_role_defaults.drupal_password_algorithm_min_core }} or newer.
+      when:
+        - verify_password_algorithm | length > 0
+        - not verify_password_algorithm_supported
+
     - name: Inspect the password hashing service
       ansible.builtin.command:
         cmd: >-
@@ -475,7 +524,9 @@
           algorithm={{ (verify_password.stdout | from_json).algorithm | default('null') }}
           producing hashes like {{ (verify_password.stdout | from_json).sample | default('?') }}.
           An unrecognised password.algorithm silently degrades to the PHP default.
-      when: verify_password_algorithm | length > 0
+      when:
+        - verify_password_algorithm | length > 0
+        - verify_password_algorithm_supported
 
     # Switching algorithms must not lock out existing users. password_verify()
     # reads the algorithm from the hash, so old bcrypt hashes keep working and
@@ -489,7 +540,9 @@
           Pre-existing bcrypt hashes do not behave correctly under the new
           algorithm: valid={{ (verify_password.stdout | from_json).bcrypt_still_valid }}
           needs_rehash={{ (verify_password.stdout | from_json).bcrypt_needs_rehash }}
-      when: verify_password_algorithm | length > 0
+      when:
+        - verify_password_algorithm | length > 0
+        - verify_password_algorithm_supported
 
     - name: Assert services.yml is loaded by the container
       ansible.builtin.command:

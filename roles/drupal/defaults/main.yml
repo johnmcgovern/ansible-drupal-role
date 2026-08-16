@@ -191,6 +191,19 @@ drupal_backup_run_on_deploy: true
 # Set to an empty string to leave PHP's default in place.
 drupal_password_algorithm: argon2id
 
+# Drupal release from which password.algorithm is actually wired up. Before
+# 11.4 the container declares the password service with no arguments --
+#
+#   password:
+#     class: Drupal\Core\Password\PhpPassword
+#
+# -- so it takes PHP's PASSWORD_DEFAULT and the parameter in services.yml is
+# read by nobody. Setting drupal_password_algorithm on an older release is not
+# an error, it simply does nothing, and the site keeps hashing with bcrypt.
+# Both the deploy and tests/verify.yml consult this so that a legitimate 11.3
+# install is not asked to prove something its core cannot do.
+drupal_password_algorithm_min_core: "11.4"
+
 # Options for password_hash(). Empty uses PHP's defaults, which for argon2id are
 # 64 MiB memory, 4 iterations and 1 thread. Raising memory_cost strengthens the
 # hash but costs RAM per concurrent login.
