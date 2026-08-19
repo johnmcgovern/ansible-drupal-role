@@ -725,6 +725,51 @@
         - verify_backup_enabled
         - verify_backup_files.files | length > 0
 
+    # Every assertion above this point is about the SQL dump. Nothing looked at
+    # the files archive, and it cannot be judged by size: on a site with no
+    # uploads it is legitimately about 500 bytes, because the php/css/js caches
+    # are excluded by design and everything else under files/ is those caches.
+    # A correctly tiny archive and a completely broken one are the same number.
+    #
+    # So read it instead. `tar -tzf` fails outright on a corrupt or truncated
+    # archive, and the files/ entry proves it is the right archive rather than
+    # an empty one -- which is what a mis-specified exclude list would produce.
+    # Verified by restoring a real upload end to end, which is the only way to
+    # know a backup is a backup.
+    # noqa justified: ansible-lint suggests the unarchive module, but that
+    # extracts, and this playbook is read-only -- unpacking a backup onto the
+    # host it is checking would be a side effect, not a test. Listing is the
+    # operation wanted, and only command does that.
+    - name: Read the file list from the most recent files archive  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: "tar -tzf {{ verify_backup_files_archive | quote }}"
+      register: verify_backup_files_list
+      changed_when: false
+      vars:
+        verify_backup_files_archive: >-
+          {{ (verify_backup_files.files | sort(attribute='mtime') | last).path
+             | regex_replace('\.sql\.gz$', '.files.tar.gz') }}
+      when:
+        - verify_backup_enabled
+        - verify_backup_files.files | length > 0
+
+    - name: Assert the files archive is readable and holds the files directory
+      ansible.builtin.assert:
+        that:
+          - "'files/' in verify_backup_files_list.stdout_lines"
+        fail_msg: >-
+          The most recent files archive does not contain a files/ entry. It
+          unpacked, so it is not corrupt, but it is not an archive of the Drupal
+          files directory either -- check drupal_backup_files_exclude, which is
+          matched against every path component and will silently swallow more
+          than intended if it names something too general.
+        success_msg: >-
+          Files archive holds {{ verify_backup_files_list.stdout_lines | length }}
+          entries.
+      when:
+        - verify_backup_enabled
+        - verify_backup_files.files | length > 0
+
     - name: Assert the restore script is installed and executable
       ansible.builtin.stat:
         path: /usr/local/sbin/drupal-restore.sh
